@@ -1,6 +1,7 @@
 context("Full simulations")
 library(coverageSim)
 
+
 test_that("Default genome simulation works", {
   simGenome6 <- simGenome(n = 6, genome_name = "artificial_uorf_1",
                           max_uorfs = 0, cds_length = c(rep.int(330, 3), rep.int(300, 3)),

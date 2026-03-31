@@ -145,6 +145,7 @@ sequence_table_controller <- function() {
 
       if (add_sequence_bias) {
         dt_range[, genes := groupings(tile)]
+        browser()
         alpha_matrix <- add_sequence_bias(simGenome, dt_range, seq_bias,
                                           region_ranges, lengths, region)
       }

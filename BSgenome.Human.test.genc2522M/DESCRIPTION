@@ -1,0 +1,16 @@
+Package: BSgenome.Human.test.genc2522M
+Title: Full genome sequences for Human.test, genc2522M
+Description: Full genome sequences for Human.test, genc2522M
+Version: 1.0
+Author: The Bioconductor Dev Team
+Maintainer: Bioconductor Package Maintainer <maintainer@bioconductor.org>
+Depends: R (>= 4.2.0), Seqinfo, BSgenome (>= 1.78.0)
+Suggests: GenomeInfoDb (>= 1.45.5), 
+License: Artistic-2.0
+organism: Human.test
+common_name: Human.test
+provider: NA
+genome: genc2522M
+release_date: NA
+source_url: NA
+biocViews: AnnotationData, Genetics, BSgenome, Human.test

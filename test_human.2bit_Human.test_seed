@@ -1,0 +1,16 @@
+Package: BSgenome.Human.test.genc2522M
+Title: Full genome sequences for Human.test, genc2522M
+Description: Full genome sequences for Human.test, genc2522M
+Version: 1.0
+organism: Human.test
+common_name: Human.test
+provider: NA
+provider_version: genc2522M
+release_date: NA
+release_name: NA
+source_url: NA
+organism_biocview: Human.test
+BSgenomeObjname: Human.test
+seqs_srcdir: .
+seqfile_name: test_human.2bit
+circ_seqs: "chrM"

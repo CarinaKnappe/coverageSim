@@ -167,7 +167,7 @@ export_genome_output_controller <- function() {
     rtracklayer::export.gff(con = out_gtf, gtf_ranges)
     simGenome <- c(genome = out_fasta, gtf = out_gtf)
     if (export_txdb) {
-      txdb <- GenomicFeatures::makeTxDbFromGFF(out_gtf,
+      txdb <- txdbmaker::makeTxDbFromGFF(out_gtf,
                                                chrominfo = seqinfo(findFa(out_fasta)),
                                                organism = "Homo sapiens")
       AnnotationDbi::saveDb(txdb, out_txdb)
