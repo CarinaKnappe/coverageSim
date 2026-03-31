@@ -2,3 +2,10 @@
 .Rhistory
 .RData
 .Ruserdata
+
+*.2bit
+*.gtf
+BSgenome.Human.test.genc2522M/
+test_human.2bit
+test_human.2bit_Human.test_seed
+
