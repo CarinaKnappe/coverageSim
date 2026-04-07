@@ -86,35 +86,40 @@ translate_orf_seq <- function(cds, faFile, is.sorted = TRUE,
   stopifnot(all(widthPerGroup(cds) %% 3 == 0))
   stopifnot(as %in% c("AA", "codon"))
   seqs <- txSeqsFromFa(cds, faFile, is.sorted = TRUE)
-  seqs <- if (as == "AA") {
+  if (as == "AA") {
     hash <- "#"; amp <- "&"; per <- "%"
     end <- end_amp <- start <- 1; m_width <- 2; ms_width <- 3
-    translate(seqs, genetic.code = genetic.code)
+    seqs <- as.character(translate(seqs, genetic.code = genetic.code))
   } else {
     hash <- "###"; amp <- "&&&"; per <- "%%%"
     end <- end_amp <- 3; start <- 5; m_width <- 6; ms_width <- 9
     seqs <- as.character(seqs)
   }
 
-  if (start.as.hash) subseq(seqs, 1, end) <- hash
+  seq_width <- nchar(seqs)
+
+  if (start.as.hash) substring(seqs, 1, end) <- hash
   if (stopm1.as.amp) {
-    lt2 <- width(seqs) > m_width
-    if (any(lt2)) subseq(seqs[lt2], width(seqs[lt2]) - start, width(seqs[lt2]) - end_amp) <- amp
+    lt2 <- seq_width > m_width
+    if (any(lt2)) {
+      substring(seqs[lt2], seq_width[lt2] - start, seq_width[lt2] - end_amp) <- amp
+    }
   }
   if (startp1.as.per) {
-    lt3 <- width(seqs) > ms_width
-    if (any(lt3)) subseq(seqs[lt3], end + 1, start + 1) <- per
+    lt3 <- seq_width > ms_width
+    if (any(lt3)) {
+      substring(seqs[lt3], end + 1, start + 1) <- per
+    }
   }
 
   if (as == "codon"){
     #subseq(seqs[lt2], width(seqs[lt2]) - 2, width(seqs[lt2])) <- "***"
-    seqs <- unlist(seqs, use.names = FALSE)
     seqs <- stringr::str_sub(string = seqs,
                              start = seq(1, nchar(seqs)-2, by = 3),
                              end = seq(3, nchar(seqs), by = 3))
   }
   if (return.as.list && as == "AA") {
-    seqs <- unlist(strsplit(as.character(unlist(seqs, use.names = FALSE)), split = ""))
+    seqs <- unlist(strsplit(seqs, split = ""))
   }
   return(seqs)
 }
@@ -405,7 +410,7 @@ autocor_window <- function(vec, max.lag, fill = NA, na.rm = FALSE,
   padding_left <- padding_right <- rep(0, split_2_low*2)
   roll <- frollapply(c(padding_left, vec, padding_right),
                      FUN = function(x) mean(x/roll_function, na.rm =T),
-                     n = window, align = "center", fill = NA)
+                     N = window, align = "center", fill = NA)
   if (padding.rm) {
     padd_to_keep <- ifelse(padding.rm > 1, padding.rm, 0)
     left_pad_index <-  seq_along(padding_left - padd_to_keep)

@@ -27,7 +27,7 @@ genome_output_test_controller <- function() {
     cds_internal_stops <-  alphabetFrequency(cds_AA)[,"*"]
     if (any(cds_internal_stops != 1) & debug_on){
       warning("malformed CDS created, corner case, rerun to avoid this")
-      browser()
+      if (interactive()) browser()
       print(sum(cds_internal_stops != 1))
       print(cds_AA[cds_internal_stops != 1])
     }
@@ -411,9 +411,17 @@ create_uORFs <- function(leader_string, chromosome_seqs, n,
   new_cds_string <- chromosome_seqs[cds_grl]
   internal_inframe_stops <- 3 + (start(Biostrings::vmatchPattern("*", heads(translate(new_cds_string), -1))) - 1)*3
   if(!all(lengths(internal_inframe_stops) == 0)) {
-    stops_matrix <- as.matrix(IntegerList(lapply(seq(n), function(x) seq.int(width(new_cds_string[x])))) %in% internal_inframe_stops)
-    temp <- Biostrings::replaceLetterAt(new_cds_string, stops_matrix,
-                                        letter = unlist(DNAStringSetList(lapply(rowSums(stops_matrix), function(x) paste(rep("C", x), collapse = "")))))
+    temp <- Biostrings::DNAStringSet(lapply(seq_along(new_cds_string), function(i) {
+      stop_positions <- as.integer(internal_inframe_stops[[i]])
+      if (length(stop_positions) == 0) {
+        return(new_cds_string[[i]])
+      }
+      Biostrings::replaceLetterAt(
+        new_cds_string[[i]],
+        at = stop_positions,
+        letter = Biostrings::DNAString(paste(rep("C", length(stop_positions)), collapse = ""))
+      )
+    }))
     a <- cds_grl; names(a) <- NULL
     b <- temp; b[!strandBool(a)] <- reverseComplement(b[!strandBool(a)])
     matching <- chmatch(names(chromosome_seqs), seqnamesPerGroup(a, FALSE))
@@ -488,7 +496,7 @@ create_uORFs <- function(leader_string, chromosome_seqs, n,
   if (start_debug) {
     all <- which(total_stops != 1)
     i <- all[1]
-    browser()
+    if (interactive()) browser()
     print(table(total_stops))
     print(translate(chromosome_seqs[uorf_ranges[i]]))
     print(chromosome_seqs[uorf_ranges[i]])

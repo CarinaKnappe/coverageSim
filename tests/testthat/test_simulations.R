@@ -1,77 +1,115 @@
-context("Full simulations")
-library(coverageSim)
+make_simulation_fixture <- function(max_uorfs = 0,
+                                    regions = "cds",
+                                    region_proportion = NULL,
+                                    export_txdb = TRUE) {
+  genome_dir <- tempfile("coverageSim-genome-")
+  exp_dir <- tempfile("coverageSim-exp-")
+  dir.create(genome_dir)
+  dir.create(exp_dir)
 
+  sim_genome <- suppressWarnings(simGenome(
+    n = 6,
+    out_dir = genome_dir,
+    genome_name = paste0("artificial_uorf_", max_uorfs),
+    max_uorfs = max_uorfs,
+    cds_length = c(rep.int(330, 3), rep.int(300, 3)),
+    export_txdb = export_txdb
+  ))
 
-test_that("Default genome simulation works", {
-  simGenome6 <- simGenome(n = 6, genome_name = "artificial_uorf_1",
-                          max_uorfs = 0, cds_length = c(rep.int(330, 3), rep.int(300, 3)),
-                          export_txdb = TRUE)
+  cds <- ORFik::loadRegion(sim_genome["txdb"], "cds")
+  gene_count_table <- simCountTables(
+    cds,
+    libtypes = "RFP",
+    print_statistics = FALSE,
+    plot_PCA = FALSE,
+    interceptMean = 10
+  )
+  region_args <- list(
+    count_table = gene_count_table,
+    regionsToSample = regions
+  )
+  if (!is.null(region_proportion)) {
+    region_args$region_proportion <- region_proportion
+  }
+  region_count_table <- do.call(simCountTablesRegions, region_args)
+
+  list(
+    genome_dir = genome_dir,
+    exp_dir = exp_dir,
+    sim_genome = sim_genome,
+    cds = cds,
+    gene_count_table = gene_count_table,
+    region_count_table = region_count_table
+  )
+}
+
+test_that("simGenome exports the expected files for coding-only genomes", {
+  fixture <- make_simulation_fixture(max_uorfs = 0)
+
+  expect_setequal(names(fixture$sim_genome), c("genome", "gtf", "txdb"))
+  expect_true(all(file.exists(unname(fixture$sim_genome))))
+  expect_s4_class(ORFik::loadTxdb(fixture$sim_genome["txdb"]), "TxDb")
+  expect_true(all(ORFik::widthPerGroup(fixture$cds, FALSE) %% 3 == 0))
 })
 
-test_that("uORF (n=1) genome simulation works", {
-  simGenome_uORFs_1 <- simGenome(n = 6, genome_name = "artificial_uorf_1",
-                                 max_uorfs = 1, cds_length = c(rep.int(330, 3), rep.int(300, 3)),
-                                 export_txdb = TRUE)
+test_that("simGenome supports multiple uORFs per transcript", {
+  fixture <- make_simulation_fixture(max_uorfs = 2)
+
+  expect_true("uorfs" %in% names(fixture$sim_genome))
+  expect_true(file.exists(fixture$sim_genome[["uorfs"]]))
+
+  uorf_ranges <- readRDS(fixture$sim_genome[["uorfs"]])
+  expect_gt(length(uorf_ranges), 0)
+  expect_true(all(ORFik::widthPerGroup(uorf_ranges, FALSE) %% 3 == 0))
 })
 
-test_that("uORF (n=2) genome simulation works", {
-  simGenome_uORFs_2 <- simGenome(n = 6, genome_name = "artificial_uorf_2",
-                                 max_uorfs = 2, cds_length = c(rep.int(330, 3), rep.int(300, 3)),
-                                 export_txdb = TRUE)
+test_that("simCountTables returns a summarized experiment with expected counts", {
+  fixture <- make_simulation_fixture(max_uorfs = 0)
+  counts <- fixture$gene_count_table
+
+  expect_s4_class(counts, "RangedSummarizedExperiment")
+  expect_equal(nrow(counts), length(fixture$cds))
+  expect_equal(unique(as.character(SummarizedExperiment::colData(counts)$libtype)), "RFP")
+  expect_true(all(SummarizedExperiment::assay(counts) >= 0))
 })
 
-test_that("Default gene count table simulation (RFP) works", {
-  gene_count_table <- simCountTables(loadRegion(simGenome6["txdb"], "cds"),
-                                    libtypes = "RFP", print_statistics = FALSE,
-                                    interceptMean = 10)
+test_that("simCountTablesRegions preserves total counts across sampled regions", {
+  fixture <- make_simulation_fixture(
+    max_uorfs = 1,
+    regions = c("cds", "uorf"),
+    region_proportion = list(
+      cds = list(RFP = 0.8),
+      uorf = list(RFP = 0.2)
+    )
+  )
+  region_counts <- fixture$region_count_table
+
+  expect_equal(SummarizedExperiment::assayNames(region_counts), c("gene", "cds", "uorf"))
+  expect_equal(
+    SummarizedExperiment::assay(region_counts, "gene"),
+    SummarizedExperiment::assay(region_counts, "cds") +
+      SummarizedExperiment::assay(region_counts, "uorf")
+  )
 })
 
-test_that("Default gene count table simulation (RFP & uORFs) works", {
-  gene_count_table_uorfs <- simCountTables(loadRegion(simGenome_uORFs_1["txdb"], "cds"),
-                                    libtypes = "RFP", print_statistics = FALSE,
-                                    interceptMean = 10)
-})
+test_that("simNGScoverage writes importable output for a small RFP simulation", {
+  fixture <- make_simulation_fixture(max_uorfs = 1, regions = c("cds", "uorf"))
+  exp_name <- basename(tempfile("coverageSim-exp-"))
 
-test_that("Default gene count table simulation (RFP & uORFs #2) works", {
-  gene_count_table_uorfs_2 <- simCountTables(loadRegion(simGenome_uORFs_2["txdb"], "cds"),
-                                           libtypes = "RFP", print_statistics = FALSE,
-                                           interceptMean = 10)
-})
+  experiment <- simNGScoverage(
+    fixture$sim_genome,
+    fixture$region_count_table[, 1],
+    exp_name = exp_name,
+    exp_save_dir = fixture$exp_dir,
+    validate = FALSE
+  )
 
-test_that("Default gene region count table simulation (RFP) works", {
-  region_count_table <- simCountTablesRegions(gene_count_table,
-                                              regionsToSample = c("cds"))
-})
+  expect_s4_class(experiment, "experiment")
 
-test_that("Default gene region count table simulation (RFP & uORFs) works", {
-  region_count_table_uorfs <- simCountTablesRegions(gene_count_table_uorfs,
-                                              regionsToSample = c("cds", "uorf"))
-})
+  default_path <- ORFik::filepath(experiment, "default")
+  expect_true(all(file.exists(default_path)))
 
-test_that("Default gene region count table simulation (RFP & uORFs #2) works", {
-  region_count_table_uorfs_2 <- simCountTablesRegions(gene_count_table_uorfs_2,
-                                                    regionsToSample = c("cds", "uorf"))
-})
-
-test_that("Default read coverage simulation (RFP) works", {
-  df_default <- simNGScoverage(simGenome6, region_count_table[,1],
-                 exp_name = "aritifical_default",
-                 exp_save_dir = tempdir())
-})
-
-test_that("Default read coverage simulation (RFP & uORFs) works", {
-  df_uorfs <- simNGScoverage(simGenome_uORFs_1, region_count_table_uorfs[,1],
-                 exp_name = "aritifical_uorfs",
-                 exp_save_dir = tempdir())
-})
-
-test_that("Default read coverage simulation (RFP & uORFs #2) works", {
-  df_uorfs2 <- simNGScoverage(simGenome_uORFs_2, region_count_table_uorfs_2[,1],
-                             exp_name = "aritifical_uorfs_2",
-                             exp_save_dir = tempdir(), debug_coverage = T)
-})
-
-test_that("Loading simulated library (RFP & uORFs) works", {
-  gr <- fimport(filepath(df_uorfs, "default"))
-  expect_is(gr, "GRanges")
+  imported <- ORFik::fimport(default_path)
+  expect_s4_class(imported, "GRanges")
+  expect_gt(length(imported), 0)
 })

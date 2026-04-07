@@ -36,4 +36,7 @@ Imports:
   rtracklayer,
   rlang,
   stringr
+Suggests:
+  testthat
+Config/testthat/edition: 3
 RoxygenNote: 7.2.1

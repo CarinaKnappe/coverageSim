@@ -167,7 +167,7 @@ simNGScoverage <- function(simGenome,
                     files = files)
   message("Saved ORFik experiment with name:")
   message(exp_name)
-  return(read.experiment(exp_name, validate = validate))
+  return(read.experiment(exp_name, in.dir = exp_save_dir, validate = validate))
 }
 
 rnase_models <- function(radius = c(0.5,1,2,10,2,1,0.5),

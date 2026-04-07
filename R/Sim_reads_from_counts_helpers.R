@@ -145,7 +145,6 @@ sequence_table_controller <- function() {
 
       if (add_sequence_bias) {
         dt_range[, genes := groupings(tile)]
-        browser()
         alpha_matrix <- add_sequence_bias(simGenome, dt_range, seq_bias,
                                           region_ranges, lengths, region)
       }
@@ -342,7 +341,7 @@ sim_sequence_bias <- function(ideal_coverage, lengths, alpha_matrix,
     res <- lapply(res, function(x) {
       x <- c(rnase2, x, rnase2)
       frollapply(x, FUN = function(i) sum(i*rnase_acf),
-              n = length(rnase_acf), align = "center", fill = NA)
+              N = length(rnase_acf), align = "center", fill = NA)
     })
   }
   # Cleanup
