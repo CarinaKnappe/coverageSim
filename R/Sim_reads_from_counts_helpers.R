@@ -51,6 +51,35 @@ list_to_mat <- function(lengths, rnase_length) {
          byrow = TRUE)
 }
 
+matrix_row_indices <- function(row_lengths) {
+  cbind(
+    rep.int(seq_along(row_lengths), row_lengths),
+    sequence(row_lengths)
+  )
+}
+
+pack_alpha_rows <- function(alpha_rows, region_length_matrix, pad_value = 1e-24) {
+  if (!length(alpha_rows)) {
+    return(matrix(pad_value, nrow = 0L, ncol = ncol(region_length_matrix)))
+  }
+
+  row_lengths <- lengths(alpha_rows)
+  alpha_matrix <- matrix(
+    pad_value,
+    nrow = length(alpha_rows),
+    ncol = ncol(region_length_matrix)
+  )
+  alpha_matrix[matrix_row_indices(row_lengths)] <- unlist(alpha_rows, use.names = FALSE)
+  alpha_matrix
+}
+
+flatten_sample_rows <- function(sample_matrix, row_lengths) {
+  if (!length(row_lengths)) {
+    return(numeric())
+  }
+  sample_matrix[matrix_row_indices(row_lengths)]
+}
+
 is_list_or_null <- function(...) {
   args <- list(...)
   mc <- match.call(expand.dots = FALSE)

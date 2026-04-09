@@ -143,8 +143,14 @@ simNGScoverage <- function(simGenome,
                                         uorf_prop_within_gene, sampling,
                                         debug_coverage, env = environment())
     # Verify all reads have been distributed correctly
-    stopifnot(all(assay_by_chromosome[,assay_column, with = FALSE][[1]]
-                  == dt_final[, sum(score), by = "seqnames"]$V1))
+    expected_counts <- data.table::data.table(
+      seqnames = assay_by_chromosome$seqnamesPer,
+      expected = assay_by_chromosome[, assay_column, with = FALSE][[1]]
+    )
+    actual_counts <- dt_final[, .(actual = sum(score)), by = "seqnames"]
+    count_check <- merge(expected_counts, actual_counts, by = "seqnames", all = TRUE)
+    count_check[is.na(count_check)] <- 0
+    stopifnot(all(count_check$expected == count_check$actual))
     dt_final <- dt_final[score > 0,]
     if (libClass == "GRanges") {
       gr_final <- makeGRangesFromDataFrame(dt_final, keep.extra.columns = TRUE)
@@ -211,26 +217,17 @@ nt_coverage_all_regions <- function(count_table_regions, libClass,
         region_length_matrix <- get(paste0("region_length_matrix", region),
                                     envir = env)
         alpha_matrix <- get(paste0("seq_alpha_list_", region), envir = env)
-        seq_lengths <- lengths/3
         # Calculate bias of coverage
         res <- sim_sequence_bias(ideal_cov, lengths,
                                  alpha_matrix, auto_cor,
                                  rnase_bias[[libtype]])
-        list_not_equal_lengths <- length(unique(lengths(res))) != 1
-        if (list_not_equal_lengths) {
-          res_matrix <- t(region_length_matrix)
-          res_matrix[res_matrix] <- unlist(res, use.names = FALSE)
-          res_matrix <- t(res_matrix)
-        } else {
-          n_nt <- length(res[[1]])
-          res_matrix <- matrix(unlist(res, use.names = FALSE), ncol = n_nt, byrow = TRUE)
-        }
-        res_matrix[region_length_matrix == FALSE] <- 1e-24
+        res_lengths <- lengths(res)
+        res_matrix <- pack_alpha_rows(res, region_length_matrix)
         #i <- 3; 57- sum(alpha_mat_3[i,] == 1e-24); lengths[i]
         n_genes <- length(res)
         sample <- extraDistr::rdirmnom(n = n_genes, size = region_counts,
                                        alpha = res_matrix)
-        sample <- t(sample)[t(region_length_matrix)]
+        sample <- flatten_sample_rows(sample, res_lengths)
       } else { #MN
         sample <- lapply(seq_along(region_ranges),
                           function(y, fun, x = lengths[y])

@@ -113,3 +113,20 @@ test_that("simNGScoverage writes importable output for a small RFP simulation", 
   expect_s4_class(imported, "GRanges")
   expect_gt(length(imported), 0)
 })
+
+test_that("simNGScoverage handles cds and uorf chromosome totals regardless of row order", {
+  set.seed(303)
+  fixture <- make_simulation_fixture(max_uorfs = 1, regions = c("cds", "uorf"))
+  exp_name <- basename(tempfile("coverageSim-exp-"))
+
+  experiment <- simNGScoverage(
+    fixture$sim_genome,
+    fixture$region_count_table[, 1],
+    exp_name = exp_name,
+    exp_save_dir = fixture$exp_dir,
+    validate = FALSE
+  )
+
+  expect_s4_class(experiment, "experiment")
+  expect_true(all(file.exists(ORFik::filepath(experiment, "default"))))
+})
