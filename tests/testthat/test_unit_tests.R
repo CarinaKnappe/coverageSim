@@ -107,3 +107,10 @@ test_that("distribute_reads_to_uORFs preserves uorf_ranges order when expanding 
   expect_equal(sum(allocated[names(allocated) == "txA"]), unname(region_counts["txA"]))
   expect_equal(sum(allocated[names(allocated) == "txB"]), unname(region_counts["txB"]))
 })
+
+test_that("libFormats validation accepts supported formats and rejects others", {
+  expect_no_error(validate_lib_formats(list(RFP = "ofst", RNA = "bam", CAGE = "sam")))
+  expect_equal(resolve_export_format(list(RFP = "bam"), "RFP"), "bam")
+  expect_error(validate_lib_formats(list(RFP = "cram")))
+  expect_error(resolve_export_format(list(RFP = c("ofst", "bam")), "RFP"))
+})

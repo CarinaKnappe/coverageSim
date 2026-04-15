@@ -38,7 +38,8 @@ ORFik::convert_to_bigWig(df)
 
 ```
 ORFik supports multiple other formats to convert to, also coverageSim internally has
-a option to simulate bam files from the ofst track output files.
+an option to export simulated libraries directly as `.ofst`, `sam`, or `bam`
+through `simNGScoverage(libFormats = ...)`.
 
 ## Relevant paths for other programs
 

@@ -43,6 +43,20 @@ make_simulation_fixture <- function(max_uorfs = 0,
   )
 }
 
+run_simulated_experiment <- function(fixture,
+                                     lib_formats = list(RFP = "ofst"),
+                                     validate = FALSE) {
+  exp_name <- basename(tempfile("coverageSim-exp-"))
+  simNGScoverage(
+    fixture$sim_genome,
+    fixture$region_count_table[, 1],
+    exp_name = exp_name,
+    exp_save_dir = fixture$exp_dir,
+    libFormats = lib_formats,
+    validate = validate
+  )
+}
+
 test_that("simGenome exports the expected files for coding-only genomes", {
   fixture <- make_simulation_fixture(max_uorfs = 0)
 
@@ -94,15 +108,7 @@ test_that("simCountTablesRegions preserves total counts across sampled regions",
 
 test_that("simNGScoverage writes importable output for a small RFP simulation", {
   fixture <- make_simulation_fixture(max_uorfs = 1, regions = c("cds", "uorf"))
-  exp_name <- basename(tempfile("coverageSim-exp-"))
-
-  experiment <- simNGScoverage(
-    fixture$sim_genome,
-    fixture$region_count_table[, 1],
-    exp_name = exp_name,
-    exp_save_dir = fixture$exp_dir,
-    validate = FALSE
-  )
+  experiment <- run_simulated_experiment(fixture)
 
   expect_s4_class(experiment, "experiment")
 
@@ -117,16 +123,35 @@ test_that("simNGScoverage writes importable output for a small RFP simulation", 
 test_that("simNGScoverage handles cds and uorf chromosome totals regardless of row order", {
   set.seed(303)
   fixture <- make_simulation_fixture(max_uorfs = 1, regions = c("cds", "uorf"))
-  exp_name <- basename(tempfile("coverageSim-exp-"))
-
-  experiment <- simNGScoverage(
-    fixture$sim_genome,
-    fixture$region_count_table[, 1],
-    exp_name = exp_name,
-    exp_save_dir = fixture$exp_dir,
-    validate = FALSE
-  )
+  experiment <- run_simulated_experiment(fixture)
 
   expect_s4_class(experiment, "experiment")
   expect_true(all(file.exists(ORFik::filepath(experiment, "default"))))
+})
+
+test_that("simNGScoverage writes SAM output through the format-specific writer", {
+  fixture <- make_simulation_fixture(max_uorfs = 1, regions = c("cds", "uorf"))
+  experiment <- run_simulated_experiment(fixture, lib_formats = list(RFP = "sam"))
+
+  sam_path <- ORFik::filepath(experiment, "default")
+  expect_match(sam_path, "\\.sam$")
+  expect_true(file.exists(sam_path))
+
+  sam_lines <- readLines(sam_path)
+  expect_true(any(grepl("^@SQ\\tSN:", sam_lines)))
+  expect_gt(sum(!grepl("^@", sam_lines)), 0)
+
+  converted_bam <- Rsamtools::asBam(sam_path)
+  expect_true(file.exists(converted_bam))
+  expect_gt(length(Rsamtools::scanBam(converted_bam)[[1]]$pos), 0)
+})
+
+test_that("simNGScoverage writes BAM output through the format-specific writer", {
+  fixture <- make_simulation_fixture(max_uorfs = 1, regions = c("cds", "uorf"))
+  experiment <- run_simulated_experiment(fixture, lib_formats = list(RFP = "bam"))
+
+  bam_path <- ORFik::filepath(experiment, "default")
+  expect_match(bam_path, "\\.bam$")
+  expect_true(file.exists(bam_path))
+  expect_gt(length(Rsamtools::scanBam(bam_path)[[1]]$pos), 0)
 })

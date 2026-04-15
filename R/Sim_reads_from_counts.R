@@ -39,7 +39,7 @@
 #' @param libClasses = list(RFP = "GRanges", RNA = "GAlignment", CAGE = "GRanges", PAS = "GRanges")
 #' @param libFormats The output formats, a named list of characters:
 #'  list(RFP = "ofst", RNA = "ofst", CAGE = "ofst", PAS = "ofst"). Alternatives:
-#'  Non at the moment.
+#'  "sam" and "bam".
 #' @param true_uorf_ranges = "AUTO". Load from uorf string in 'simGenome'.
 #' @param seq_bias the sequence bias used for simulation, default:
 #' load_seq_bias(), the Ribosome profiling estimates from Amino acid dwell times from
@@ -157,10 +157,15 @@ simNGScoverage <- function(simGenome,
     } else {
       gr_final <- ORFik:::getGAlignments(dt_final)
     }
-    #print(gr_final)
-    file <- file.path(out_dir, paste0(assay_column, ".ofst"))
-    export.ofst(gr_final, file = file)
-    files <- c(files, file)
+    format <- resolve_export_format(libFormats, libtypes[s])
+    file_base <- file.path(out_dir, assay_column)
+    written_files <- write_simulated_library(
+      gr_final,
+      file_base = file_base,
+      format = format,
+      seqinfo = GenomeInfoDb::seqinfo(gr_final)
+    )
+    files <- c(files, unname(written_files["default"]))
   }
   replicates <- as.character(colData(count_table)$replicate)
   conditions <- as.character(colData(count_table)$condition)

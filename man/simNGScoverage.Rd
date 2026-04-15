@@ -76,7 +76,7 @@ uorf =   list(RFP = "DMN"))}
 
 \item{libFormats}{The output formats, a named list of characters:
 list(RFP = "ofst", RNA = "ofst", CAGE = "ofst", PAS = "ofst"). Alternatives:
-Non at the moment.}
+"sam" and "bam".}
 
 \item{seq_bias}{the sequence bias used for simulation, default:
 load_seq_bias(), the Ribosome profiling estimates from Amino acid dwell times from

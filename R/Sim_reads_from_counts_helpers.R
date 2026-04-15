@@ -37,6 +37,75 @@ samFromGAlignment <- function(x, path, seqinfo = GenomeInfoDb::seqinfo(x),
   return(res)
 }
 
+normalize_lib_formats <- function(libFormats) {
+  if (is.character(libFormats)) {
+    return(as.list(libFormats))
+  }
+  libFormats
+}
+
+resolve_export_format <- function(libFormats, libtype) {
+  libFormats <- normalize_lib_formats(libFormats)
+  format <- unlist(libFormats[libtype], use.names = FALSE)
+  if (!length(format)) {
+    stop("Missing libFormats entry for libtype: ", libtype)
+  }
+  if (length(format) != 1) {
+    stop("Exactly one output format must be provided per libtype")
+  }
+  format
+}
+
+validate_lib_formats <- function(libFormats, allowed = c("ofst", "sam", "bam")) {
+  libFormats <- normalize_lib_formats(libFormats)
+  format_values <- unlist(libFormats, use.names = FALSE)
+  stopifnot(length(format_values) > 0)
+  if (!all(format_values %in% allowed)) {
+    stop(
+      "Unsupported libFormats value. Allowed values are: ",
+      paste(allowed, collapse = ", ")
+    )
+  }
+}
+
+write_ofst_library <- function(x, path) {
+  export.ofst(x, file = path)
+  c(default = path, ofst = path)
+}
+
+write_sam_library <- function(x, path, seqinfo = GenomeInfoDb::seqinfo(x)) {
+  sam_path <- sub("\\.[^.]+$", ".sam", path)
+  if (!grepl("\\.sam$", sam_path)) {
+    sam_path <- paste0(sam_path, ".sam")
+  }
+  samFromGAlignment(x, path = sam_path, seqinfo = seqinfo, make_bam = FALSE)
+  c(default = sam_path, sam = sam_path)
+}
+
+write_bam_library <- function(x, path, seqinfo = GenomeInfoDb::seqinfo(x)) {
+  bam_path <- sub("\\.[^.]+$", ".bam", path)
+  if (!grepl("\\.bam$", bam_path)) {
+    bam_path <- paste0(bam_path, ".bam")
+  }
+  sam_path <- sub("\\.bam$", ".sam", bam_path)
+  samFromGAlignment(x, path = sam_path, seqinfo = seqinfo, make_bam = TRUE)
+  if (file.exists(sam_path)) {
+    unlink(sam_path)
+  }
+  c(default = bam_path, bam = bam_path)
+}
+
+write_simulated_library <- function(x, file_base, format,
+                                    seqinfo = GenomeInfoDb::seqinfo(x)) {
+  switch(
+    format,
+    ofst = write_ofst_library(x, paste0(file_base, ".ofst")),
+    sam = write_sam_library(x, paste0(file_base, ".sam"), seqinfo = seqinfo),
+    bam = write_bam_library(x, paste0(file_base, ".bam"), seqinfo = seqinfo),
+    stop("Unsupported format: ", format)
+  )
+}
+
 
 
 list_to_mat <- function(lengths, rnase_length) {
@@ -118,7 +187,7 @@ input_validation_controller <- function() {
     stopifnot(is(count_table, "SummarizedExperiment"))
     if (!is.null(seq_bias))
       stopifnot(c("seqs", "alpha") %in% colnames(seq_bias))
-    if (!all(unlist(libFormats) == "ofst")) stop("Only 'ofst' is supported as NGS file format currently!")
+    validate_lib_formats(libFormats)
     all_allowed_regions <- c("leader", "cds", "trailer", "uorf")
     regionsToSample <- assayNames(count_table)[-1]
     stopifnot(all(regionsToSample %in% all_allowed_regions))
