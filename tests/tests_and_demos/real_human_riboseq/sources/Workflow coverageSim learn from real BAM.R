@@ -11,8 +11,22 @@ library(SummarizedExperiment)
 # avoid holding unnecessary large objects once each learning step is complete.
 data.table::setDTthreads(4)
 
-base_dir <- path.expand(
-  "~/forks/coverageSim/tests/tests_and_demos/real_human_riboseq"
+repo_dir <- normalizePath(
+  Sys.getenv("COVSIM_REPO", unset = getwd()),
+  mustWork = TRUE
+)
+
+base_dir <- normalizePath(
+  Sys.getenv(
+    "COVSIM_REAL_BASE",
+    unset = file.path(
+      repo_dir,
+      "tests",
+      "tests_and_demos",
+      "real_human_riboseq"
+    )
+  ),
+  mustWork = TRUE
 )
 
 real_exp_dir <- file.path(base_dir, "experiment")
@@ -23,22 +37,45 @@ out_exp_dir <- file.path(out_base, "server_full", "experiment")
 dir.create(out_reads_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(out_exp_dir, recursive = TRUE, showWarnings = FALSE)
 
+exp_name <- "human_real_riboseq"
+original_exp <- file.path(real_exp_dir, paste0(exp_name, ".csv"))
+stopifnot(file.exists(original_exp))
+
+fixed_exp_dir <- tempfile("fixed-real-exp-")
+dir.create(fixed_exp_dir)
+
+exp_lines <- readLines(original_exp)
+old_bases <- c(
+  "~/forks/coverageSim/tests/tests_and_demos/real_human_riboseq",
+  "/home/carink/forks/coverageSim/tests/tests_and_demos/real_human_riboseq",
+  "~/coverageSim/tests/tests_and_demos/real_human_riboseq",
+  "/home/carink/coverageSim/tests/tests_and_demos/real_human_riboseq"
+)
+
+for (old_base in old_bases) {
+  exp_lines <- gsub(old_base, base_dir, exp_lines, fixed = TRUE)
+}
+
+writeLines(exp_lines, file.path(fixed_exp_dir, paste0(exp_name, ".csv")))
+
 df <- ORFik::read.experiment(
-  "human_real_riboseq",
-  in.dir = real_exp_dir,
+  exp_name,
+  in.dir = fixed_exp_dir,
   validate = FALSE
 )
 
-uniqueMappers(df) <- TRUE
-
 sim_genome <- c(
-  genome = df@fafile,
+  genome = file.path(base_dir, "genome", "GRCh38.primary_assembly.genome.fa"),
   gtf = file.path(
     base_dir,
     "genome",
     "gencode.v49.primary_assembly.basic.annotation.gtf"
   ),
-  txdb = df@txdb
+  txdb = file.path(
+    base_dir,
+    "genome",
+    "gencode.v49.primary_assembly.basic.annotation.gtf.db"
+  )
 )
 
 stopifnot(all(file.exists(sim_genome)))
