@@ -75,6 +75,16 @@ replace_letters_by_width_group <- function(x, positions, letter = "C") {
   result
 }
 
+uorf_debug_warning <- function(problem) {
+  warning(
+    problem,
+    " Adjust uORF settings (for example longer leaders, fewer uORFs, ",
+    "or disabled overlaps), or set debug_on = FALSE to skip interactive ",
+    "debug mode for these stochastic uORF edge cases.",
+    call. = FALSE
+  )
+}
+
 genome_exon_ranges_controller <- function() {
   with(rlang::caller_env(),{
     exon_cds_ranges <- cds_ranges
@@ -514,12 +524,12 @@ create_uORFs <- function(leader_string, chromosome_seqs, n,
   total_stops <- alphabetFrequency(translate(chromosome_seqs[uorf_ranges]))[,"*"]
   start_debug <- FALSE
   if (any(total_stops > 1) & debug_on) {
-    warning("Some uORFs have internal stop codons that could not be fixed!")
-    message("Starting browser debug mode, rerun if you do not care about the details")
+    uorf_debug_warning("Some uORFs have internal stop codons that could not be fixed!")
+    message("Starting browser debug mode because debug_on = TRUE.")
     start_debug <- TRUE
   } else if (any(total_stops == 0) & debug_on) {
-    warning("Some uORFs have no stop codon")
-    message("Starting browser debug mode, rerun if you do not care about the details")
+    uorf_debug_warning("Some uORFs have no stop codon.")
+    message("Starting browser debug mode because debug_on = TRUE.")
     start_debug <- TRUE
   }
   if (start_debug) {

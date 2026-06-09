@@ -84,6 +84,17 @@ test_that("replace_letters_by_width_group matches per-sequence replacement on mi
   expect_equal(as.character(actual), as.character(expected))
 })
 
+test_that("uorf debug warnings explain how to avoid interactive debug mode", {
+  expect_warning(
+    uorf_debug_warning("Some uORFs have internal stop codons that could not be fixed!"),
+    regexp = "set debug_on = FALSE"
+  )
+  expect_warning(
+    uorf_debug_warning("Some uORFs have no stop codon."),
+    regexp = "longer leaders, fewer uORFs, or disabled overlaps"
+  )
+})
+
 test_that("distribute_reads_to_uORFs preserves uorf_ranges order when expanding transcript counts", {
   region_counts <- c(txB = 7, txA = 5)
   assay <- matrix(region_counts, ncol = 1, dimnames = list(names(region_counts), "sample"))

@@ -114,9 +114,12 @@ translate_orf_seq <- function(cds, faFile, is.sorted = TRUE,
 
   if (as == "codon"){
     #subseq(seqs[lt2], width(seqs[lt2]) - 2, width(seqs[lt2])) <- "***"
-    seqs <- stringr::str_sub(string = seqs,
-                             start = seq(1, nchar(seqs)-2, by = 3),
-                             end = seq(3, nchar(seqs), by = 3))
+    seqs <- lapply(seqs, function(seq) {
+      stringr::str_sub(string = seq,
+                       start = seq(1, nchar(seq) - 2, by = 3),
+                       end = seq(3, nchar(seq), by = 3))
+    })
+    if (!return.as.list) seqs <- unlist(seqs, use.names = FALSE)
   }
   if (return.as.list && as == "AA") {
     seqs <- unlist(strsplit(seqs, split = ""))

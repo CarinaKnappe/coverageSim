@@ -120,6 +120,42 @@ test_that("simNGScoverage writes importable output for a small RFP simulation", 
   expect_gt(length(imported), 0)
 })
 
+test_that("simNGScoverage supports codon sequence bias across multiple CDS transcripts", {
+  fixture <- make_simulation_fixture(max_uorfs = 0, regions = "cds")
+  experiment <- simNGScoverage(
+    fixture$sim_genome,
+    fixture$region_count_table[, 1],
+    exp_name = basename(tempfile("coverageSim-codon-bias-")),
+    exp_save_dir = fixture$exp_dir,
+    seq_bias = load_seq_bias(type = "codon", shift = "p-site", bias = "all"),
+    libFormats = list(RFP = "ofst"),
+    validate = FALSE
+  )
+
+  imported <- ORFik::fimport(ORFik::filepath(experiment, "default")[1])
+
+  expect_s4_class(experiment, "experiment")
+  expect_gt(length(imported), 0)
+})
+
+test_that("simNGScoverage supports default RFP frame coverage without sequence bias", {
+  fixture <- make_simulation_fixture(max_uorfs = 0, regions = "cds")
+  experiment <- simNGScoverage(
+    fixture$sim_genome,
+    fixture$region_count_table[, 1],
+    exp_name = basename(tempfile("coverageSim-no-seq-bias-")),
+    exp_save_dir = fixture$exp_dir,
+    seq_bias = NULL,
+    libFormats = list(RFP = "ofst"),
+    validate = FALSE
+  )
+
+  imported <- ORFik::fimport(ORFik::filepath(experiment, "default")[1])
+
+  expect_s4_class(experiment, "experiment")
+  expect_gt(length(imported), 0)
+})
+
 test_that("simNGScoverage handles cds and uorf chromosome totals regardless of row order", {
   set.seed(303)
   fixture <- make_simulation_fixture(max_uorfs = 1, regions = c("cds", "uorf"))
