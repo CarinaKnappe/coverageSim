@@ -438,8 +438,10 @@ sim_sequence_bias <- function(ideal_coverage, lengths, alpha_matrix,
     rnase2 <- rep(0, length(rnase_acf) - 1)
     res <- lapply(res, function(x) {
       x <- c(rnase2, x, rnase2)
-      frollapply(x, FUN = function(i) sum(i*rnase_acf),
-              N = length(rnase_acf), align = "center", fill = NA)
+      frollapply_compat(x,
+                        window = length(rnase_acf),
+                        FUN = function(i) sum(i*rnase_acf),
+                        align = "center", fill = NA)
     })
   }
   # Cleanup
