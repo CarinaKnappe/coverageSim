@@ -112,9 +112,9 @@ gene_count_table <- simCountTables(
   libtypes = "RFP",
   conditions = c("WT", "KO"),
   replicates = 2,
-  interceptMean = 10,
-  interceptSD = 2,
-  betaSD = 1,
+  interceptMean = 4,
+  interceptSD = 1.5,
+  betaSD = 0.2,
   betaLibSD = c(RFP = 1),
   print_statistics = FALSE,
   plot_PCA = FALSE
@@ -178,7 +178,7 @@ sim_exp <- simNGScoverage(
   out_dir = out_reads_dir,
   exp_name = exp_name,
   exp_save_dir = out_exp_dir,
-  read_lengths_per = list(RFP = 27:29),
+  read_lengths_per = list(RFP = 28:30),
   ideal_coverage = list(
     cds = list(RFP = quote(rep(c(1, 0, 0), length.out = x)))
   ),
@@ -188,6 +188,7 @@ sim_exp <- simNGScoverage(
   sampling = list(
     cds = list(RFP = "DMN")
   ),
+  seq_bias = load_seq_bias(type = "codon", shift = "a-site", bias = "all"),
   libFormats = list(RFP = "bam"),
   validate = TRUE,
   debug_coverage = FALSE
