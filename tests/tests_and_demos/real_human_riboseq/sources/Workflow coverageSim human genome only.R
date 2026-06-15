@@ -15,8 +15,10 @@ library(SummarizedExperiment)
 # Optional environment variables:
 #   COVSIM_REPO                    coverageSim repository path
 #   COVSIM_REAL_BASE               real_human_riboseq folder
-#   COVSIM_HUMAN_GENOME_TOP_N      limit to top N CDSs after simulated counts
-#   COVSIM_HUMAN_GENOME_OUT_TAG    output folder tag
+#   COVSIM_HUMAN_GENOME_TOP_N        limit to top N CDSs after simulated counts
+#   COVSIM_HUMAN_GENOME_TARGET_READS target total reads across all samples
+#                                  default: 40000000; set to 0 to disable
+#   COVSIM_HUMAN_GENOME_OUT_TAG      output folder tag
 
 data.table::setDTthreads(4)
 
@@ -134,8 +136,33 @@ region_count_table <- simCountTablesRegions(
   region_proportion = list(cds = list(RFP = 1))
 )
 
+target_reads <- as.numeric(Sys.getenv(
+  "COVSIM_HUMAN_GENOME_TARGET_READS",
+  unset = "40000000"
+))
+
+current_reads <- sum(SummarizedExperiment::assay(region_count_table, "cds"))
+
+if (!is.na(target_reads) && target_reads > 0 && current_reads > target_reads) {
+  scale <- target_reads / current_reads
+  message(
+    "Downscaling simulated counts from ",
+    current_reads,
+    " to approximately ",
+    round(target_reads),
+    " total reads across all samples."
+  )
+  region_count_table <- scale_count_table(
+    region_count_table,
+    scale = scale,
+    min_count = 0L
+  )
+}
+
+message("Simulated reads requested per sample:")
+print(colSums(SummarizedExperiment::assay(region_count_table, "cds")))
 message(
-  "Simulated reads requested: ",
+  "Total simulated reads requested: ",
   sum(SummarizedExperiment::assay(region_count_table, "cds"))
 )
 
