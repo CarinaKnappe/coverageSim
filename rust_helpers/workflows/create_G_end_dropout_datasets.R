@@ -1,7 +1,16 @@
 rm(list = ls(all.names = TRUE))
 gc(reset = TRUE)
 
-devtools::load_all(".")
+repo_dir <- normalizePath(
+  Sys.getenv("COVSIM_REPO", unset = getwd()),
+  mustWork = TRUE
+)
+
+devtools::load_all(repo_dir)
+
+# Helper code is kept outside the coverageSim package so this technical-bias
+# dataset generator does not become part of the simulator core.
+source(file.path(repo_dir, "rust_helpers", "R", "G_end_dropout_helpers.R"))
 
 input_base_raw <- Sys.getenv(
   "COVSIM_G_DROP_INPUT",
@@ -38,6 +47,8 @@ if (!length(input_bams)) {
 }
 
 link_genome_files <- function(input_base, output_base) {
+  # The dropout datasets reuse the same genome/annotation. Symlinks avoid
+  # copying large FASTA/GTF/TxDb files for each dropout fraction.
   input_genome <- file.path(input_base, "genome")
   output_genome <- file.path(output_base, "genome")
   dir.create(output_genome, recursive = TRUE, showWarnings = FALSE)
@@ -63,6 +74,8 @@ read_stats <- function(path) {
 }
 
 filter_bam_g_end <- function(input_bam, output_bam, drop_fraction, seed, stats_file) {
+  # Stream BAM -> SAM -> AWK filter -> BAM so large read files are not loaded
+  # into R memory. Only reads whose sequence ends in G are randomly removed.
   awk_file <- tempfile(fileext = ".awk")
   writeLines(g_end_dropout_awk_program(), awk_file)
   on.exit(unlink(awk_file), add = TRUE)
@@ -88,6 +101,8 @@ filter_bam_g_end <- function(input_bam, output_bam, drop_fraction, seed, stats_f
 summary_list <- list()
 exp_lines <- readLines(input_exp)
 
+# Create one complete dataset per dropout level so each can be analysed by the
+# same RUST/plotting scripts without special-case paths.
 for (drop_fraction in drop_fractions) {
   label <- g_end_dropout_label(drop_fraction)
   output_base <- file.path(output_parent, paste0(basename(input_base), "_", label))

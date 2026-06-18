@@ -1,9 +1,12 @@
 test_that("human genome-only workflow is parseable and does not require BAM learning", {
-  workflow <- test_path(
-    "..",
-    "tests_and_demos",
-    "real_human_riboseq",
-    "sources",
+  repo_dir <- normalizePath(
+    Sys.getenv("COVSIM_REPO", unset = testthat::test_path("..", "..")),
+    mustWork = TRUE
+  )
+  workflow <- file.path(
+    repo_dir,
+    "rust_helpers",
+    "workflows",
     "Workflow coverageSim human genome only.R"
   )
 

@@ -1,3 +1,10 @@
+repo_dir <- normalizePath(
+  Sys.getenv("COVSIM_REPO", unset = testthat::test_path("..", "..")),
+  mustWork = TRUE
+)
+
+source(file.path(repo_dir, "rust_helpers", "R", "Learn_from_input.R"))
+
 make_learn_input_fixture <- function() {
   genome_dir <- tempfile("coverageSim-learn-genome-")
   exp_dir <- tempfile("coverageSim-learn-exp-")

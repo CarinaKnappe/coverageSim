@@ -8,6 +8,9 @@ point_reads <- function(reads, focal_offset = 0L) {
   point <- GenomicRanges::granges(reads)
   plus <- as.character(GenomicRanges::strand(point)) != "-"
 
+  # Ribo-seq footprints are imported as full genomic ranges. For codon-bias
+  # learning we count one focal position per read, using the strand-aware 5' end
+  # as the anchor and then applying an optional A-/P-site offset.
   plus_points <- GenomicRanges::resize(point[plus], width = 1, fix = "start")
   minus_points <- GenomicRanges::resize(point[!plus], width = 1, fix = "end")
 
@@ -32,6 +35,9 @@ point_reads <- function(reads, focal_offset = 0L) {
 learn_read_lengths <- function(reads, min_length = 25L, max_length = 34L,
                                max_observations = 1e6) {
   widths <- as.integer(ORFik::readWidths(reads))
+
+  # Keep only the footprint-size range we want the simulator to sample from.
+  # Returning repeated lengths preserves the empirical frequency distribution.
   widths <- widths[widths >= min_length & widths <= max_length]
   if (!length(widths)) {
     stop("No read lengths remained after filtering.", call. = FALSE)
@@ -56,6 +62,8 @@ learn_read_lengths <- function(reads, min_length = 25L, max_length = 34L,
 learn_cds_count_table <- function(cds, reads, sample_name = "RFP_real_1",
                                   condition = "real", replicate = "1",
                                   min_reads = 1L) {
+  # coveragePerTiling returns one coverage vector per CDS/transcript. Summing
+  # each vector gives a simulator-ready CDS count table for the real sample.
   cov <- ORFik::coveragePerTiling(
     cds,
     reads,
@@ -102,6 +110,9 @@ learn_cds_count_table <- function(cds, reads, sample_name = "RFP_real_1",
 learn_codon_seq_bias <- function(cds, reads, fa_file, focal_offset = 0L,
                                  min_tx_reads = 20L, alpha_scale = 100,
                                  pseudocount = 1e-3) {
+  # First reduce reads to focal-site points, then count those points over CDS
+  # codons. This estimates codon-specific enrichment while avoiding full-read
+  # footprint width as an extra signal.
   point <- point_reads(reads, focal_offset = focal_offset)
   GenomeInfoDb::seqlevels(point, pruning.mode = "coarse") <-
     GenomeInfoDb::seqlevels(cds)
@@ -138,6 +149,8 @@ learn_codon_seq_bias <- function(cds, reads, fa_file, focal_offset = 0L,
     tab <- tab[!grepl("N", codon)]
     if (!nrow(tab)) next
 
+    # Normalize within each transcript before pooling so highly expressed CDSs
+    # do not dominate the learned codon bias by count depth alone.
     tab[, occurrences := .N, by = codon]
     tab[, tx_norm := (count / tx_sum) / occurrences]
     tab <- tab[, .(tx_norm = sum(tx_norm)), by = codon]

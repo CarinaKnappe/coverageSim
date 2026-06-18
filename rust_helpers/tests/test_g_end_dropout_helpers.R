@@ -1,3 +1,10 @@
+repo_dir <- normalizePath(
+  Sys.getenv("COVSIM_REPO", unset = testthat::test_path("..", "..")),
+  mustWork = TRUE
+)
+
+source(file.path(repo_dir, "rust_helpers", "R", "G_end_dropout_helpers.R"))
+
 test_that("G-end dropout labels are stable", {
   expect_equal(g_end_dropout_label(0.30), "drop_G_30")
   expect_equal(g_end_dropout_label(0.60), "drop_G_60")

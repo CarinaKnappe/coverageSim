@@ -1,20 +1,22 @@
 rm(list = ls(all.names = TRUE))
 gc(reset = TRUE)
 
-devtools::load_all(".")
-
-library(coverageSim)
-library(ORFik)
-library(SummarizedExperiment)
-
-# Server/full-data settings. Keep all usable CDSs and all learned counts, but
-# avoid holding unnecessary large objects once each learning step is complete.
-data.table::setDTthreads(4)
-
 repo_dir <- normalizePath(
   Sys.getenv("COVSIM_REPO", unset = getwd()),
   mustWork = TRUE
 )
+
+devtools::load_all(repo_dir)
+
+library(coverageSim)
+library(ORFik)
+# Server/full-data settings. Keep all usable CDSs and all learned counts, but
+# avoid holding unnecessary large objects once each learning step is complete.
+data.table::setDTthreads(4)
+
+# Keep real-input learning outside the package namespace. These helpers are
+# analysis adapters; coverageSim itself should not depend on them.
+source(file.path(repo_dir, "rust_helpers", "R", "Learn_from_input.R"))
 
 base_dir <- normalizePath(
   Sys.getenv(
@@ -52,6 +54,9 @@ old_bases <- c(
   "/home/carink/coverageSim/tests/tests_and_demos/real_human_riboseq"
 )
 
+# The experiment CSV may have been written on a laptop or server with a
+# different base path. Rewrite only the known base prefixes and keep the CSV
+# structure itself unchanged.
 for (old_base in old_bases) {
   exp_lines <- gsub(old_base, base_dir, exp_lines, fixed = TRUE)
 }
@@ -80,6 +85,8 @@ sim_genome <- c(
 
 stopifnot(all(file.exists(sim_genome)))
 
+# Load the real BAM once. The object is reused for read-length learning,
+# count-table learning, and codon-bias learning, then removed before simulation.
 reads <- ORFik::fimport(ORFik::filepath(df, "default")[1])
 
 cds <- ORFik::loadRegion(df, "cds")
@@ -97,6 +104,8 @@ cds <- cds[names(cds) %in% tx_filt]
 rm(tx_filt)
 gc(reset = TRUE)
 
+# Codon-bias estimation requires complete CDS triplets. Incomplete CDS ranges
+# are skipped instead of trying to infer the missing bases.
 complete_cds <- ORFik::widthPerGroup(cds, FALSE) %% 3 == 0
 message(
   "Keeping codon-complete CDS transcripts: ",
@@ -161,6 +170,8 @@ gc(reset = TRUE)
 
 set.seed(42)
 
+# From here on we call coverageSim normally: the learned objects are passed in
+# as ordinary count/read-length/codon-bias inputs.
 sim_exp <- simNGScoverage(
   simGenome = sim_genome,
   count_table = count_table,

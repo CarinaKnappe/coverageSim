@@ -1,12 +1,15 @@
 rm(list = ls(all.names = TRUE))
 gc(reset = TRUE)
 
-devtools::load_all(".")
+repo_dir <- normalizePath(
+  Sys.getenv("COVSIM_REPO", unset = getwd()),
+  mustWork = TRUE
+)
+
+devtools::load_all(repo_dir)
 
 library(coverageSim)
 library(ORFik)
-library(SummarizedExperiment)
-
 # Genome-only workflow:
 # - uses the real human FASTA and TxDb/GTF as the sequence/annotation substrate
 # - does not read or learn from any real Ribo-seq BAM
@@ -21,11 +24,6 @@ library(SummarizedExperiment)
 #   COVSIM_HUMAN_GENOME_OUT_TAG      output folder tag
 
 data.table::setDTthreads(4)
-
-repo_dir <- normalizePath(
-  Sys.getenv("COVSIM_REPO", unset = getwd()),
-  mustWork = TRUE
-)
 
 base_dir <- normalizePath(
   Sys.getenv(
@@ -75,6 +73,24 @@ sim_genome <- c(
   txdb = txdb_file
 )
 
+scale_region_count_table <- function(count_table, scale, min_count = 0L) {
+  # This workflow intentionally does not use the real-BAM learning helpers.
+  # Downscaling is local here because it is only a memory/runtime control for
+  # full-human-genome test runs, not a core simulator feature. Scale every assay
+  # so the gene total and sampled region counts remain internally consistent.
+  stopifnot(is.numeric(scale), length(scale) == 1L, scale > 0, scale <= 1)
+  if (scale == 1) return(count_table)
+
+  for (assay_name in SummarizedExperiment::assayNames(count_table)) {
+    mat <- SummarizedExperiment::assay(count_table, assay_name)
+    scaled <- round(mat * scale)
+    scaled[mat > 0 & scaled < min_count] <- min_count
+    SummarizedExperiment::assay(count_table, assay_name) <- scaled
+  }
+
+  count_table
+}
+
 out_tag <- Sys.getenv(
   "COVSIM_HUMAN_GENOME_OUT_TAG",
   unset = "human_genome_only"
@@ -88,9 +104,13 @@ dir.create(out_reads_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(out_exp_dir, recursive = TRUE, showWarnings = FALSE)
 
 message("Loading CDS regions from TxDb...")
+# Use the real human annotation as the transcript structure source. No real
+# Ribo-seq reads are imported in this workflow.
 cds <- ORFik::loadRegion(txdb_file, "cds")
 
 cds_widths <- ORFik::widthPerGroup(cds, FALSE)
+# Keep only CDSs that can be split into complete codons. The short-width guard
+# avoids tiny edge cases that do not provide useful codon-level coverage.
 complete_cds <- (cds_widths %% 3 == 0) & (cds_widths > 50)
 
 message(
@@ -107,6 +127,9 @@ gc(reset = TRUE)
 set.seed(42)
 
 message("Simulating synthetic RFP count table on human CDSs...")
+# Simulate expression levels on the human CDS annotation. These parameters are
+# aligned with the CDS-only synthetic runs so only the genome/annotation source
+# changes here.
 gene_count_table <- simCountTables(
   cds,
   libtypes = "RFP",
@@ -152,7 +175,7 @@ if (!is.na(target_reads) && target_reads > 0 && current_reads > target_reads) {
     round(target_reads),
     " total reads across all samples."
   )
-  region_count_table <- scale_count_table(
+  region_count_table <- scale_region_count_table(
     region_count_table,
     scale = scale,
     min_count = 0L
@@ -172,6 +195,9 @@ gc(reset = TRUE)
 exp_name <- paste0("human_genome_only_covsim_", out_tag)
 
 message("Simulating coverage on human genome/annotation...")
+# Simulate coverage from the synthetic count table. The BAM output is for
+# downstream inspection/RUST input; the simulator inputs are still standard
+# coverageSim count, read-length, autocorrelation, and sequence-bias settings.
 sim_exp <- simNGScoverage(
   simGenome = sim_genome,
   count_table = region_count_table,
