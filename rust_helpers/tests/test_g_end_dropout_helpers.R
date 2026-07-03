@@ -28,46 +28,53 @@ test_that("experiment paths are rewritten to the dropout dataset", {
   )
 })
 
-test_that("G-end AWK program removes reads ending in G", {
-  skip_if(Sys.which("awk") == "", "awk is not available")
+test_that("terminal bases are reconstructed from reference and strand", {
+  fasta_file <- tempfile(fileext = ".fa")
+  Biostrings::writeXStringSet(
+    Biostrings::DNAStringSet(c(chr1 = "AACCGGTT")),
+    fasta_file
+  )
+  Rsamtools::indexFa(fasta_file)
 
-  sam_file <- tempfile(fileext = ".sam")
-  stats_file <- tempfile(fileext = ".txt")
-  writeLines(
-    c(
-      "@HD\tVN:1.6\tSO:coordinate",
-      "r1\t0\tchr1\t1\t255\t3M\t*\t0\t0\tAAG\tIII",
-      "r2\t0\tchr1\t2\t255\t3M\t*\t0\t0\tAAA\tIII",
-      "r3\t0\tchr1\t3\t255\t3M\t*\t0\t0\tCCG\tIII",
-      "r4\t0\tchr1\t4\t255\t3M\t*\t0\t0\tTTT\tIII"
-    ),
-    sam_file
+  chunk <- list(
+    rname = factor(c("chr1", "chr1", "chr1")),
+    pos = c(1L, 2L, 2L),
+    cigar = c("3M", "3M", "3M"),
+    strand = factor(c("+", "+", "-"))
   )
 
-  awk_file <- tempfile(fileext = ".awk")
-  writeLines(g_end_dropout_awk_program(), awk_file)
+  expect_equal(
+    reference_terminal_nt_from_alignment(chunk, fasta_file),
+    c("C", "C", "T")
+  )
+})
 
-  filtered <- system2(
-    "awk",
-    c(
-      "-v", "drop=1",
-      "-v", "seed=1",
-      "-v", paste0("stats=", stats_file),
-      "-f", awk_file,
-      sam_file
-    ),
-    stdout = TRUE
+test_that("reference-based G-end filter drops reconstructed G-ending reads", {
+  fasta_file <- tempfile(fileext = ".fa")
+  Biostrings::writeXStringSet(
+    Biostrings::DNAStringSet(c(chr1 = "AAAGCCCT")),
+    fasta_file
+  )
+  Rsamtools::indexFa(fasta_file)
+
+  chunk <- list(
+    rname = factor(c("chr1", "chr1", "chr1")),
+    pos = c(1L, 4L, 6L),
+    cigar = c("3M", "3M", "3M"),
+    strand = factor(c("+", "+", "-"))
   )
 
-  expect_true(any(grepl("^@HD", filtered)))
-  expect_false(any(grepl("^r1\\t", filtered)))
-  expect_true(any(grepl("^r2\\t", filtered)))
-  expect_false(any(grepl("^r3\\t", filtered)))
-  expect_true(any(grepl("^r4\\t", filtered)))
+  filter <- make_reference_g_end_filter(
+    fasta_file = fasta_file,
+    drop_fraction = 1,
+    seed = 1
+  )
 
-  stats <- readLines(stats_file)
-  expect_true("total\t4" %in% stats)
-  expect_true("g_end\t2" %in% stats)
-  expect_true("removed\t2" %in% stats)
-  expect_true("kept\t2" %in% stats)
+  keep <- filter$filter_fun(chunk)
+
+  expect_equal(keep, c(TRUE, TRUE, FALSE))
+  expect_equal(filter$stats$total, 3L)
+  expect_equal(filter$stats$g_end, 1L)
+  expect_equal(filter$stats$removed, 1L)
+  expect_equal(filter$stats$kept, 2L)
 })

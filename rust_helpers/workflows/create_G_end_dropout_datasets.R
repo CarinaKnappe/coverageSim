@@ -27,11 +27,6 @@ exp_name <- "human_flavoured_riboseq"
 drop_fractions <- c(0.30, 0.60, 1.00)
 seed <- 42L
 
-samtools <- Sys.which("samtools")
-if (samtools == "") {
-  stop("samtools is required for BAM filtering and indexing")
-}
-
 input_exp <- file.path(input_base, "experiment", paste0(exp_name, ".csv"))
 if (!file.exists(input_exp)) {
   stop("Experiment CSV not found: ", input_exp)
@@ -45,6 +40,25 @@ input_bams <- list.files(
 if (!length(input_bams)) {
   stop("No BAM files found in: ", file.path(input_base, "reads"))
 }
+
+input_fasta <- Sys.getenv("COVSIM_G_DROP_FASTA", unset = "")
+if (!nzchar(input_fasta)) {
+  fasta_candidates <- list.files(
+    file.path(input_base, "genome"),
+    pattern = "\\.(fa|fasta)$",
+    full.names = TRUE,
+    ignore.case = TRUE
+  )
+  if (length(fasta_candidates) != 1L) {
+    stop(
+      "Expected exactly one FASTA in ", file.path(input_base, "genome"),
+      ". Set COVSIM_G_DROP_FASTA explicitly."
+    )
+  }
+  input_fasta <- fasta_candidates[[1]]
+}
+input_fasta <- normalizePath(path.expand(input_fasta), mustWork = TRUE)
+message("Using reference FASTA for G-end reconstruction: ", input_fasta)
 
 link_genome_files <- function(input_base, output_base) {
   # The dropout datasets reuse the same genome/annotation. Symlinks avoid
@@ -73,29 +87,30 @@ read_stats <- function(path) {
   as.list(values)
 }
 
-filter_bam_g_end <- function(input_bam, output_bam, drop_fraction, seed, stats_file) {
-  # Stream BAM -> SAM -> AWK filter -> BAM so large read files are not loaded
-  # into R memory. Only reads whose sequence ends in G are randomly removed.
-  awk_file <- tempfile(fileext = ".awk")
-  writeLines(g_end_dropout_awk_program(), awk_file)
-  on.exit(unlink(awk_file), add = TRUE)
-
-  cmd <- paste(
-    "set -euo pipefail;",
-    shQuote(samtools), "view -h", shQuote(input_bam), "|",
-    "awk",
-    "-v", shQuote(paste0("drop=", drop_fraction)),
-    "-v", shQuote(paste0("seed=", seed)),
-    "-v", shQuote(paste0("stats=", stats_file)),
-    "-f", shQuote(awk_file), "|",
-    shQuote(samtools), "view -b -o", shQuote(output_bam), "-;",
-    shQuote(samtools), "index", shQuote(output_bam)
+filter_bam_g_end <- function(input_bam, output_bam, drop_fraction, seed,
+                             stats_file, fasta_file) {
+  # coverageSim BAMs can have empty SEQ fields, so terminal bases are inferred
+  # from FASTA + alignment coordinates instead of SAM column 10.
+  filter <- make_reference_g_end_filter(
+    fasta_file = fasta_file,
+    drop_fraction = drop_fraction,
+    seed = seed
   )
 
-  status <- system2("bash", c("-c", cmd))
-  if (!identical(status, 0L)) {
-    stop("BAM filtering failed for: ", input_bam)
-  }
+  param <- Rsamtools::ScanBamParam(
+    what = c("rname", "pos", "strand", "cigar"),
+    flag = Rsamtools::scanBamFlag(isUnmappedQuery = FALSE)
+  )
+
+  Rsamtools::filterBam(
+    file = input_bam,
+    destination = output_bam,
+    param = param,
+    filter = filter$rules,
+    indexDestination = TRUE
+  )
+
+  write_g_end_dropout_stats(filter$stats, stats_file)
 }
 
 summary_list <- list()
@@ -129,7 +144,8 @@ for (drop_fraction in drop_fractions) {
       output_bam = output_bam,
       drop_fraction = drop_fraction,
       seed = seed + as.integer(round(drop_fraction * 1000)) + match(input_bam, input_bams),
-      stats_file = stats_file
+      stats_file = stats_file,
+      fasta_file = input_fasta
     )
 
     stats <- read_stats(stats_file)
