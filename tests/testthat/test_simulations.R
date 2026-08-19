@@ -45,7 +45,7 @@ make_simulation_fixture <- function(max_uorfs = 0,
 
 run_simulated_experiment <- function(fixture,
                                      lib_formats = list(RFP = "ofst"),
-                                     validate = FALSE) {
+                                     validate = FALSE, ...) {
   exp_name <- basename(tempfile("coverageSim-exp-"))
   simNGScoverage(
     fixture$sim_genome,
@@ -53,9 +53,24 @@ run_simulated_experiment <- function(fixture,
     exp_name = exp_name,
     exp_save_dir = fixture$exp_dir,
     libFormats = lib_formats,
-    validate = validate
+    validate = validate,
+    ...
   )
 }
+
+test_that("simNGScoverage retains the explicitly named legacy point mode", {
+  fixture <- make_simulation_fixture(max_uorfs = 0, regions = "cds")
+  experiment <- run_simulated_experiment(
+    fixture,
+    fragment_mode = "legacy_point"
+  )
+  imported <- ORFik::fimport(ORFik::filepath(experiment, "default")[1])
+
+  expect_s4_class(imported, "GRanges")
+  expect_false(is(imported, "GAlignments"))
+  expect_true(all(GenomicRanges::width(imported) == 1L))
+  expect_true(all(S4Vectors::mcols(imported)$size %in% 27:29))
+})
 
 test_that("simGenome exports the expected files for coding-only genomes", {
   fixture <- make_simulation_fixture(max_uorfs = 0)
@@ -116,7 +131,7 @@ test_that("simNGScoverage writes importable output for a small RFP simulation", 
   expect_true(all(file.exists(default_path)))
 
   imported <- ORFik::fimport(default_path)
-  expect_s4_class(imported, "GRanges")
+  expect_s4_class(imported, "GAlignments")
   expect_gt(length(imported), 0)
 })
 

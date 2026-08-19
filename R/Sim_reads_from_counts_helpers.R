@@ -20,6 +20,9 @@ samFromGAlignment <- function(x, path, seqinfo = GenomeInfoDb::seqinfo(x),
   if (is(x, "GRanges")) x <- GAlignments(seqnames = seqnames(x), pos = start(x),
                                          cigar = paste0(readWidths(x),"M"), strand = strand(x),
                                          score = mcols(x)$score)
+  if (identical(sequences, "*") && !is.null(S4Vectors::mcols(x)$sequence)) {
+    sequences <- as.character(S4Vectors::mcols(x)$sequence)
+  }
   chr_header <- paste("@SQ", paste0("SN:", seqnames(seqinfo)),
                       paste0("LN:",seqlengths(seqinfo)), sep = "\t")
 
@@ -233,6 +236,9 @@ sequence_table_controller <- function() {
                                          start = unlist(start(tile), use.names = FALSE),
                                          end = unlist(start(tile), use.names = FALSE),
                                          strand = as.character(unlist(strand(tile), use.names = FALSE)))
+      tile_groups <- groupings(tile)
+      transcript_ids <- txNames(region_ranges)
+      dt_range[, transcript_id := transcript_ids[tile_groups]]
       alpha_matrix <- NULL
       add_sequence_bias <- region %in% c("cds", "uorf") & !is.null(seq_bias)
       if (unlist(sampling[[region]])[1] == "DMN") {
@@ -251,8 +257,13 @@ sequence_table_controller <- function() {
           dt_range[, genes := groupings(tile)]
           dt_range[, position := seq_len(.N), by = genes]
         }
-        dt_range <- append_rnase_to_dt(dt_range, lengths, rnase_bias)
+        dt_range <- if (exists("fragment_mode") && fragment_mode == "physical") {
+          append_rnase_to_physical_table(dt_range, rnase_bias, models)
+        } else {
+          append_rnase_to_dt(dt_range, lengths, rnase_bias)
+        }
       }
+      dt_range[, signal_position := start]
 
 
       assign(paste0("seq_alpha_list_", region), alpha_matrix)
