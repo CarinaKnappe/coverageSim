@@ -39,6 +39,10 @@ make_learn_input_fixture <- function() {
     region_count_table[, 1],
     exp_name = exp_name,
     exp_save_dir = exp_dir,
+    fragment_geometry = list(
+      source = "default", site_reference = "a_site",
+      boundary_action = "renormalize"
+    ),
     libFormats = list(RFP = "ofst"),
     validate = FALSE
   )
@@ -81,10 +85,33 @@ test_that("learned real-input helpers create simulator-ready objects", {
   )
   expect_gt(nrow(count_table), 0)
 
+  geometry <- learn_fragment_geometry(
+    reads,
+    fixture$cds,
+    site_reference = "a_site",
+    min_length = 1L,
+    max_length = 100L,
+    min_reads_per_length = 1L,
+    max_observations = 500L
+  )
+
+  expect_s3_class(geometry, "data.table")
+  expect_true(all(c(
+    "fragment_length", "site_offset", "probability", "frame_fraction",
+    "read_count", "site_reference"
+  ) %in% names(geometry)))
+  expect_equal(sum(geometry$probability), 1)
+  expect_true(all(geometry$site_reference == "a_site"))
+  expect_true(all(abs(
+    geometry$site_offset -
+      expected_site_offset(geometry$fragment_length, "a_site")
+  ) <= 1L))
+
   seq_bias <- learn_codon_seq_bias(
     fixture$cds,
     reads,
     fa_file = fixture$sim_genome["genome"],
+    geometry_distribution = geometry,
     min_tx_reads = 1L
   )
 

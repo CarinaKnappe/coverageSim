@@ -15,13 +15,26 @@ point_reads <- function(reads, focal_offset = 0L) {
   minus_points <- GenomicRanges::resize(point[!plus], width = 1, fix = "end")
 
   if (length(plus_points) > 0L && focal_offset != 0L) {
-    plus_points <- GenomicRanges::shift(plus_points, shift = focal_offset)
+    plus_points <- suppressWarnings(
+      GenomicRanges::shift(plus_points, shift = focal_offset)
+    )
   }
   if (length(minus_points) > 0L && focal_offset != 0L) {
-    minus_points <- GenomicRanges::shift(minus_points, shift = -focal_offset)
+    minus_points <- suppressWarnings(
+      GenomicRanges::shift(minus_points, shift = -focal_offset)
+    )
   }
 
-  c(plus_points, minus_points)
+  keep_in_bounds <- function(x) {
+    sequence_length <- GenomeInfoDb::seqlengths(x)[
+      as.character(GenomicRanges::seqnames(x))
+    ]
+    keep <- GenomicRanges::start(x) >= 1L &
+      (is.na(sequence_length) | GenomicRanges::end(x) <= sequence_length)
+    x[keep]
+  }
+
+  c(keep_in_bounds(plus_points), keep_in_bounds(minus_points))
 }
 
 #' Learn empirical read lengths from imported reads
@@ -34,7 +47,7 @@ point_reads <- function(reads, focal_offset = 0L) {
 #'   distribution when passed to \code{simNGScoverage(read_lengths_per=)}.
 learn_read_lengths <- function(reads, min_length = 25L, max_length = 34L,
                                max_observations = 1e6) {
-  widths <- as.integer(ORFik::readWidths(reads))
+  widths <- suppressWarnings(as.integer(ORFik::readWidths(reads)))
 
   # Keep only the footprint-size range we want the simulator to sample from.
   # Returning repeated lengths preserves the empirical frequency distribution.
@@ -48,6 +61,109 @@ learn_read_lengths <- function(reads, min_length = 25L, max_length = 34L,
   }
 
   widths
+}
+
+expected_site_offset <- function(fragment_length,
+                                 site_reference = c("a_site", "p_site")) {
+  site_reference <- match.arg(site_reference)
+  fragment_length <- as.integer(fragment_length)
+  p_offset <- ifelse(
+    fragment_length <= 27L, 11L,
+    ifelse(fragment_length <= 30L, 12L, 13L)
+  )
+  as.integer(p_offset + ifelse(site_reference == "a_site", 3L, 0L))
+}
+
+point_reads_from_geometry <- function(reads, geometry_distribution) {
+  geometry <- data.table::as.data.table(geometry_distribution)
+  required <- c("fragment_length", "site_offset")
+  if (!all(required %in% names(geometry))) {
+    stop("geometry_distribution requires fragment_length and site_offset")
+  }
+  if (anyDuplicated(geometry$fragment_length)) {
+    stop("Coverage learning requires one learned offset per fragment length")
+  }
+  widths <- suppressWarnings(as.integer(ORFik::readWidths(reads)))
+  points <- lapply(seq_len(nrow(geometry)), function(i) {
+    keep <- widths == geometry$fragment_length[i]
+    if (!any(keep)) return(NULL)
+    point_reads(reads[keep], focal_offset = geometry$site_offset[i])
+  })
+  points <- points[!vapply(points, is.null, logical(1))]
+  if (!length(points)) stop("No reads matched the learned fragment geometry")
+  do.call(c, unname(points))
+}
+
+site_frame_score <- function(cds, points) {
+  mapped <- GenomicFeatures::mapToTranscripts(points, cds)
+  total <- length(mapped)
+  in_frame <- sum((GenomicRanges::start(mapped) - 1L) %% 3L == 0L)
+  c(in_frame = in_frame, total = total,
+    frame_fraction = if (total > 0) in_frame / total else NA_real_)
+}
+
+learn_fragment_geometry <- function(reads, cds,
+                                    site_reference = c("a_site", "p_site"),
+                                    min_length = 25L, max_length = 34L,
+                                    min_reads_per_length = 100L,
+                                    max_observations = 1e6) {
+  site_reference <- match.arg(site_reference)
+  overlaps <- GenomicRanges::findOverlaps(
+    GenomicRanges::granges(reads), unlist(cds, use.names = FALSE),
+    ignore.strand = FALSE
+  )
+  keep <- unique(S4Vectors::queryHits(overlaps))
+  if (!length(keep)) stop("No reads overlapped the CDS set for geometry learning")
+  reads <- reads[keep]
+  widths <- suppressWarnings(as.integer(ORFik::readWidths(reads)))
+  eligible <- which(widths >= min_length & widths <= max_length)
+  if (!length(eligible)) stop("No reads remained for fragment-geometry learning")
+  if (!is.null(max_observations) && length(eligible) > max_observations) {
+    eligible <- sample(eligible, as.integer(max_observations), replace = FALSE)
+  }
+  reads <- reads[eligible]
+  widths <- widths[eligible]
+  length_counts <- table(widths)
+  usable_lengths <- as.integer(names(length_counts)[
+    length_counts >= min_reads_per_length
+  ])
+  if (!length(usable_lengths)) {
+    stop("No fragment length reached min_reads_per_length")
+  }
+
+  diagnostics <- data.table::rbindlist(lapply(usable_lengths, function(fragment_length) {
+    expected <- expected_site_offset(fragment_length, site_reference)
+    offsets <- pmax(0L, expected + c(-1L, 0L, 1L))
+    length_reads <- reads[widths == fragment_length]
+    data.table::rbindlist(lapply(offsets, function(offset) {
+      score <- site_frame_score(cds, point_reads(length_reads, offset))
+      data.table::data.table(
+        fragment_length = fragment_length,
+        site_offset = offset,
+        expected_offset = expected,
+        read_count = length(length_reads),
+        in_frame_count = as.integer(score[["in_frame"]]),
+        cds_count = as.integer(score[["total"]]),
+        frame_fraction = score[["frame_fraction"]]
+      )
+    }))
+  }))
+  diagnostics[, selection_score := data.table::fifelse(
+    is.na(frame_fraction), -Inf, frame_fraction
+  )]
+  selected <- diagnostics[
+    order(-selection_score, abs(site_offset - expected_offset)),
+    .SD[1L], by = fragment_length
+  ]
+  if (any(!is.finite(selected$selection_score))) {
+    stop("No CDS-position evidence was available for one or more fragment lengths")
+  }
+  selected[, selection_score := NULL]
+  diagnostics[, selection_score := NULL]
+  selected[, probability := read_count / sum(read_count)]
+  selected[, site_reference := site_reference]
+  attr(selected, "offset_diagnostics") <- diagnostics
+  selected[]
 }
 
 #' Learn CDS count table from real reads
@@ -102,18 +218,25 @@ learn_cds_count_table <- function(cds, reads, sample_name = "RFP_real_1",
 #' @param reads imported reads.
 #' @param fa_file genome FASTA matching \code{cds}.
 #' @param focal_offset integer offset for focal-site conversion.
+#' @param geometry_distribution optional learned table with one site offset per
+#'   fragment length. When supplied it supersedes `focal_offset`.
 #' @param min_tx_reads minimum transcript focal-site counts to include.
 #' @param alpha_scale multiplier for learned probabilities.
 #' @param pseudocount small count added to each codon class.
 #' @return a data.table with columns \code{variable}, \code{seqs}, and
 #'   \code{alpha}, compatible with \code{simNGScoverage(seq_bias=)}.
 learn_codon_seq_bias <- function(cds, reads, fa_file, focal_offset = 0L,
+                                 geometry_distribution = NULL,
                                  min_tx_reads = 20L, alpha_scale = 100,
                                  pseudocount = 1e-3) {
   # First reduce reads to focal-site points, then count those points over CDS
   # codons. This estimates codon-specific enrichment while avoiding full-read
   # footprint width as an extra signal.
-  point <- point_reads(reads, focal_offset = focal_offset)
+  point <- if (is.null(geometry_distribution)) {
+    point_reads(reads, focal_offset = focal_offset)
+  } else {
+    point_reads_from_geometry(reads, geometry_distribution)
+  }
   GenomeInfoDb::seqlevels(point, pruning.mode = "coarse") <-
     GenomeInfoDb::seqlevels(cds)
   GenomeInfoDb::seqlengths(point) <-

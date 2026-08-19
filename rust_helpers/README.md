@@ -20,3 +20,21 @@ loaded with the package.
   coverageSim workflow.
 - `workflows/create_G_end_dropout_datasets.R`: technical G-ending dropout
   dataset workflow.
+
+## Alignment-coordinate semantics
+
+The RUST learning helpers treat imported alignments as complete physical
+fragments. `point_reads()` anchors each alignment at its strand-aware biological
+5-prime end and then applies the optional `focal_offset` to obtain an A-/P-site
+or another focal position. RUST therefore expects true fragment ends in OFST or
+BAM input, not coverage points that were already shifted to a ribosome site.
+
+The physical-fragment mode in coverageSim follows that expectation. The
+explicit `legacy_point` mode does not: its alignment start is the simulated
+signal position and should not be interpreted as a physical 5-prime end.
+
+The read-end helpers prefer BAM `SEQ`. Their historical FASTA fallback infers a
+single contiguous reference interval from POS and reference-consuming CIGAR
+width; that fallback is not suitable for spliced CIGARs containing `N`.
+CoverageSim does not modify these downstream RUST helpers as part of physical
+fragment generation.
