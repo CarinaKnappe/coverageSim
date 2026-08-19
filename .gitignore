@@ -9,3 +9,12 @@ BSgenome.Human.test.genc2522M/
 test_human.2bit
 test_human.2bit_Human.test_seed
 
+# Generated simulation/demo outputs (keep workflow scripts in this directory).
+tests/tests_and_demos/*/experiment/
+tests/tests_and_demos/*/genome/
+tests/tests_and_demos/*/reads/
+tests/tests_and_demos/*/read_end_nt_summary/
+tests/tests_and_demos/*_G_end_dropout_summary.csv
+
+# Large external human input/output dataset; store outside the repository.
+tests/tests_and_demos/real_human_riboseq/
