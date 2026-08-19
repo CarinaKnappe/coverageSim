@@ -117,18 +117,7 @@ cds <- cds[complete_cds]
 rm(complete_cds)
 gc(reset = TRUE)
 
-# Use an empirical read-length vector, but cap it to keep this object small.
-# Repeated values preserve the learned length frequencies for simNGScoverage.
-read_lengths <- learn_read_lengths(
-  reads,
-  min_length = 25L,
-  max_length = 34L,
-  max_observations = 100000L
-)
-
-message("Learned read length distribution used for simulation:")
-print(table(read_lengths))
-
+# Learn expression first; geometry is calibrated only on retained CDSs below.
 message("Learning CDS count table from real BAM...")
 count_table <- learn_cds_count_table(
   cds,
@@ -140,6 +129,20 @@ count_table <- learn_cds_count_table(
 )
 
 message("CDSs with real signal used for simulation: ", nrow(count_table))
+
+top_n <- as.integer(Sys.getenv("COVSIM_LEARN_TOP_N", unset = "0"))
+if (!is.na(top_n) && top_n > 0L) {
+  count_table <- subset_top_cds_counts(count_table, top_n)
+  message("Keeping top learned CDSs: ", nrow(count_table))
+}
+
+target_reads <- as.numeric(Sys.getenv("COVSIM_LEARN_TARGET_READS", unset = "0"))
+current_reads <- sum(SummarizedExperiment::assay(count_table, "cds"))
+if (!is.na(target_reads) && target_reads > 0 && current_reads > target_reads) {
+  count_table <- scale_count_table(
+    count_table, scale = target_reads / current_reads, min_count = 1L
+  )
+}
 message(
   "Simulated reads requested from learned CDS counts: ",
   sum(SummarizedExperiment::assay(count_table, "cds"))
@@ -147,7 +150,35 @@ message(
 
 cds_learned <- SummarizedExperiment::rowRanges(count_table)
 
-# Drop the broader CDS set before focal-site coverage learning.
+geometry_max_reads <- as.integer(Sys.getenv(
+  "COVSIM_LEARN_GEOMETRY_MAX_READS", unset = "200000"
+))
+geometry_min_per_length <- as.integer(Sys.getenv(
+  "COVSIM_LEARN_GEOMETRY_MIN_PER_LENGTH", unset = "100"
+))
+
+message("Learning length-specific A-site fragment geometry...")
+fragment_geometry_distribution <- learn_fragment_geometry(
+  reads = reads,
+  cds = cds,
+  site_reference = "a_site",
+  min_length = 25L,
+  max_length = 34L,
+  min_reads_per_length = geometry_min_per_length,
+  max_observations = geometry_max_reads
+)
+geometry_file <- file.path(out_base, "learned_fragment_geometry.tsv")
+diagnostics_file <- file.path(out_base, "learned_fragment_geometry_diagnostics.tsv")
+data.table::fwrite(fragment_geometry_distribution, geometry_file, sep = "\t")
+data.table::fwrite(
+  attr(fragment_geometry_distribution, "offset_diagnostics"),
+  diagnostics_file, sep = "\t"
+)
+message("Learned A-site fragment geometry:")
+print(fragment_geometry_distribution)
+
+# Geometry benefits from all qualified CDSs; codon-bias learning below is
+# intentionally restricted to the retained simulation transcripts.
 rm(cds)
 gc(reset = TRUE)
 
@@ -155,7 +186,7 @@ seq_bias <- learn_codon_seq_bias(
   cds_learned,
   reads,
   fa_file = sim_genome["genome"],
-  focal_offset = 0L,
+  geometry_distribution = fragment_geometry_distribution,
   min_tx_reads = 20L,
   alpha_scale = 100
 )
@@ -163,22 +194,24 @@ seq_bias <- learn_codon_seq_bias(
 message("Top learned codon alpha values:")
 print(seq_bias[order(-alpha)][1:10])
 
-# The large read object is no longer needed after counts, read lengths, and
-# codon bias are learned. Free it before simNGScoverage builds simulation tables.
+# The large read object is no longer needed after counts, fragment geometry,
+# and codon bias are learned. Free it before simulation builds sequence tables.
 rm(reads, cds_learned)
 gc(reset = TRUE)
 
 set.seed(42)
 
-# From here on we call coverageSim normally: the learned objects are passed in
-# as ordinary count/read-length/codon-bias inputs.
+# From here on the learned counts, joint A-site geometry, and codon bias are
+# passed to coverageSim through its regular public inputs.
 sim_exp <- simNGScoverage(
   simGenome = sim_genome,
   count_table = count_table,
   out_dir = out_reads_dir,
   exp_name = "human_real_learned_covsim_server_full",
   exp_save_dir = out_exp_dir,
-  read_lengths_per = list(RFP = read_lengths),
+  read_lengths_per = list(
+    RFP = fragment_geometry_distribution$fragment_length
+  ),
   ideal_coverage = list(
     cds = list(RFP = quote(rep(c(1, 0, 0), length.out = x)))
   ),
@@ -186,6 +219,17 @@ sim_exp <- simNGScoverage(
     cds = list(RFP = shapes(9))
   ),
   seq_bias = seq_bias,
+  fragment_geometry = list(
+    source = "learned",
+    site_reference = "a_site",
+    distribution = fragment_geometry_distribution[, .(
+      fragment_length, site_offset, probability
+    )],
+    boundary_action = "renormalize",
+    five_prime_bias = list(source = "none"),
+    three_prime_bias = list(source = "none")
+  ),
+  ground_truth = TRUE,
   sampling = list(
     cds = list(RFP = "DMN")
   ),

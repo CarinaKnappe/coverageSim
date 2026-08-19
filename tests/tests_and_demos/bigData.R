@@ -13,22 +13,35 @@ devtools::load_all(".")
 library(ORFik)
 library(SummarizedExperiment)
 
-out_base <- "tests/tests_and_demos/3000a_high_depth_different_gene_counts"
+n_genes <- as.integer(Sys.getenv("COVSIM_BIGDATA_N_GENES", unset = "3000"))
+if (is.na(n_genes) || n_genes < 1L) {
+  stop("COVSIM_BIGDATA_N_GENES must be a positive integer")
+}
+
+run_tag <- Sys.getenv(
+  "COVSIM_BIGDATA_RUN_TAG",
+  unset = paste0(n_genes, "_genes_physical_asite")
+)
+out_root <- Sys.getenv(
+  "COVSIM_BIGDATA_OUT_ROOT",
+  unset = "tests/tests_and_demos"
+)
+out_base <- file.path(out_root, run_tag)
 
 dir.create(out_base, recursive = TRUE, showWarnings = FALSE)
 dir.create(file.path(out_base, "genome"), recursive = TRUE, showWarnings = FALSE)
 dir.create(file.path(out_base, "reads"), recursive = TRUE, showWarnings = FALSE)
 dir.create(file.path(out_base, "experiment"), recursive = TRUE, showWarnings = FALSE)
 
-set.seed(42)
+seed <- as.integer(Sys.getenv("COVSIM_BIGDATA_SEED", unset = "42"))
+set.seed(seed)
 
-n_genes <- 3000
 n_reps  <- 2
 conds   <- c("WT", "KO")
 
 leader_length  <- rep(120, n_genes)
 cds_length     <- rep(600, n_genes)
-trailer_length <- rep(180, n_genes)
+trailer_length <- rep(120, n_genes)
 cds_intron_len <- rep(90, n_genes)
 
 sim_genome <- simGenome(
@@ -40,6 +53,8 @@ sim_genome <- simGenome(
   trailer_length = trailer_length,
   cds_exons = 2,
   cds_intron_length = cds_intron_len,
+  # uORFs are deliberately enabled so their geometry and 10% signal fraction
+  # are exercised in both the smoke test and the full run.
   max_uorfs = 2,
   uorfs_can_overlap = TRUE,
   uorfs_can_overlap_cds = 0,
@@ -78,6 +93,23 @@ region_counts <- simCountTablesRegions(
   )
 )
 
+region_totals <- data.frame(
+  region = c("leader", "cds", "trailer", "uorf"),
+  do.call(rbind, lapply(
+    c("leader", "cds", "trailer", "uorf"),
+    function(region) {
+      colSums(SummarizedExperiment::assay(region_counts, region))
+    }
+  )),
+  check.names = FALSE
+)
+colnames(region_totals)[-1L] <- colnames(region_counts)
+data.table::fwrite(
+  region_totals,
+  file.path(out_base, "simulated_region_counts.tsv"),
+  sep = "\t"
+)
+
 exp <- simNGScoverage(
   simGenome = sim_genome,
   count_table = region_counts,
@@ -94,6 +126,14 @@ exp <- simNGScoverage(
     cds = list(RFP = shapes(9)),
     uorf = list(RFP = shapes(9))
   ),
+  fragment_geometry = list(
+    source = "default",
+    site_reference = "a_site",
+    boundary_action = "renormalize",
+    five_prime_bias = list(source = "none"),
+    three_prime_bias = list(source = "none")
+  ),
+  ground_truth = TRUE,
   libFormats = list(RFP = "bam"),
   validate = TRUE,
   debug_coverage = FALSE
@@ -102,8 +142,13 @@ exp <- simNGScoverage(
 bam_files <- ORFik::filepath(exp, "default")
 print(bam_files)
 
+message("Ground-truth files:")
+print(list.files(file.path(out_base, "reads"), pattern = "ground.truth", full.names = TRUE))
+
 count_mat <- SummarizedExperiment::assay(gene_counts)
 sample_info <- as.data.frame(SummarizedExperiment::colData(gene_counts))
+
+grDevices::pdf(file.path(out_base, "simulation_diagnostics.pdf"))
 
 wt_cols <- which(sample_info$condition == "WT")
 ko_cols <- which(sample_info$condition == "KO")
@@ -120,14 +165,19 @@ plot(
 )
 abline(0, 1, col = "red", lty = 2)
 
-region_totals <- rbind(
+region_plot_totals <- rbind(
   leader  = colSums(SummarizedExperiment::assay(region_counts, "leader")),
   cds     = colSums(SummarizedExperiment::assay(region_counts, "cds")),
   trailer = colSums(SummarizedExperiment::assay(region_counts, "trailer")),
   uorf    = colSums(SummarizedExperiment::assay(region_counts, "uorf"))
 )
 
-region_props <- sweep(region_totals, 2, colSums(region_totals), "/")
+region_props <- sweep(
+  region_plot_totals,
+  2,
+  colSums(region_plot_totals),
+  "/"
+)
 
 barplot(
   region_props,
@@ -145,3 +195,5 @@ legend(
   fill = c("steelblue", "tomato", "goldenrod", "darkseagreen4"),
   bty = "n"
 )
+
+grDevices::dev.off()

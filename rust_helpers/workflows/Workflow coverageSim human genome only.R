@@ -215,6 +215,14 @@ sim_exp <- simNGScoverage(
     cds = list(RFP = "DMN")
   ),
   seq_bias = load_seq_bias(type = "codon", shift = "a-site", bias = "all"),
+  fragment_geometry = list(
+    source = "default",
+    site_reference = "a_site",
+    boundary_action = "renormalize",
+    five_prime_bias = list(source = "none"),
+    three_prime_bias = list(source = "none")
+  ),
+  ground_truth = TRUE,
   libFormats = list(RFP = "bam"),
   validate = TRUE,
   debug_coverage = FALSE
