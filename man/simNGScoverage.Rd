@@ -93,7 +93,9 @@ a data.table with correctly named columns:
  In addition iMethionin
  (start codon) can be differentiated by setting seq = "#" and stop codon
  as seq = "*". Gives ability to scale these two important regions seperatly
- from other codons.}
+from other codons.
+If a \code{variable} column is present, it must identify exactly one profile.
+Tables returned by \code{load_seq_bias(bias = "all")} must be subset first.}
 
 \item{true_uorf_ranges}{= "AUTO". Load from uorf string in 'simGenome'.}
 

@@ -360,10 +360,24 @@ nt_coverage_all_regions_old <- function(count_table_regions, libClass, assay,
   }))
 }
 
+validate_sequence_profile <- function(seq_bias) {
+  if (is.null(seq_bias) || is.null(seq_bias$variable)) return(invisible(NULL))
+  profiles <- unique(as.character(seq_bias$variable))
+  if (length(profiles) != 1L || anyNA(profiles) || !nzchar(profiles)) {
+    stop(
+      "seq_bias must contain exactly one named sequence profile. ",
+      "Select one with load_seq_bias(bias = 'R2') or subset your table; ",
+      "bias = 'all' is for inspection, not simulation.",
+      call. = FALSE
+    )
+  }
+  invisible(NULL)
+}
+
 add_sequence_bias <- function(simGenome, dt_range, tAI, region_ranges, lengths, region) {
+  validate_sequence_profile(tAI)
+  tAI <- data.table::copy(tAI)
   if (!is.null(tAI$variable)) {
-    tAI <- tAI[variable == unique(variable)[1],]
-    stopifnot(nrow(tAI) > 0)
     tAI$variable <- NULL
   }
   if (is.factor(tAI$seqs)) tAI[, seqs := as.character(seqs)]
@@ -478,8 +492,10 @@ sim_sequence_bias <- function(ideal_coverage, lengths, alpha_matrix,
 #' @param shift character, default "p-site". Alternative: "a-site"
 #' @param dir Directory with sequence biases, default is internal path
 #' predefined estimators: system.file(package = "coverageSim", "extdata")
-#' @param bias character, default: "start_codon". Alternative: "stop_codon",
-#' "similar" (uniform like), or "all" (to load all).
+#' @param bias One profile name (e.g. "R2"), or one of the aliases
+#' "start_codon" (default, R2), "stop_codon" (R1), and "similar" (R10).
+#' "all" loads every profile for inspection; select one before passing the
+#' table to \code{simNGScoverage()}.
 #' @return a data.table of bias per sequence motif
 #' @export
 #' @examples
@@ -491,19 +507,23 @@ load_seq_bias <- function(type = "AA", shift = "p-site",
                           bias = "start_codon") {
   stopifnot(type %in% c("AA", "codon"))
   stopifnot(shift %in% c("p-site", "a-site"))
+  if (!is.character(bias) || length(bias) != 1L || is.na(bias) || !nzchar(bias)) {
+    stop("bias must be one profile name, alias, or 'all'", call. = FALSE)
+  }
   shift <- gsub("-", "_", shift)
   file <- paste0(type, "_bias_", shift, "_estimates_human.csv")
   dt <- fread(file.path(dir, file))
-  if (bias == "start_codon") {
-    dt <- dt[variable == "R2",]
-  } else if (bias == "stop_codon") {
-    dt <- dt[variable == "R1",]
-  } else if (bias == "similar") {
-    dt <- dt[variable == "R10",]
-  } else if (bias == "all") {
-    # Return full
-  } else stop("bias must be either of: start_codon, stop_codon or similar!")
-  return(dt)
+  if (bias == "all") return(dt)
+  aliases <- c(start_codon = "R2", stop_codon = "R1", similar = "R10")
+  profile <- if (bias %in% names(aliases)) unname(aliases[[bias]]) else bias
+  if (!profile %in% dt$variable) {
+    stop(
+      "Unknown bias profile: ", bias, ". Choose one of: ",
+      paste(c(names(aliases), unique(dt$variable), "all"), collapse = ", "),
+      call. = FALSE
+    )
+  }
+  dt[variable == profile, ]
 }
 
 append_rnase_to_dt <- function(dt_range, lengths, rnase_bias) {

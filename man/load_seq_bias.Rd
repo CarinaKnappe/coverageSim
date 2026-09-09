@@ -20,8 +20,10 @@ codon}
 \item{dir}{Directory with sequence biases, default is internal path
 predefined estimators: system.file(package = "coverageSim", "extdata")}
 
-\item{bias}{character, default: "start_codon". Alternative: "stop_codon",
-"similar" (uniform like), or "all" (to load all).}
+\item{bias}{One profile name (e.g. "R2"), or one of the aliases
+"start_codon" (default, R2), "stop_codon" (R1), and "similar" (R10).
+"all" loads every profile for inspection; select one before passing the
+table to \code{simNGScoverage()}.}
 }
 \value{
 a data.table of bias per sequence motif

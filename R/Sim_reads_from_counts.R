@@ -52,6 +52,8 @@
 #'  (start codon) can be differentiated by setting seq = "#" and stop codon
 #'  as seq = "*". Gives ability to scale these two important regions seperatly
 #'  from other codons.
+#'  If a \code{variable} column is present, it must identify exactly one profile.
+#'  Tables returned by \code{load_seq_bias(bias = "all")} must be subset first.
 #' @param uorf_prop_within_gene = "uniform". How should counts for uORF be
 #' distributed. Alternatives: 'length' (length biased), or user specified
 #' list of numeric values for all ORFs.
@@ -127,6 +129,7 @@ simNGScoverage <- function(simGenome,
                            ground_truth = FALSE,
                            debug_coverage = FALSE) {
   fragment_mode <- match.arg(fragment_mode)
+  validate_sequence_profile(seq_bias)
   if (fragment_mode == "physical") {
     warning("fragment_mode = 'physical' is deprecated; use 'simulated_rpf'")
     fragment_mode <- "simulated_rpf"

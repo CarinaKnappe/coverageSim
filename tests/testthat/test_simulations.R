@@ -265,7 +265,7 @@ test_that("simNGScoverage supports codon sequence bias across multiple CDS trans
     fixture$region_count_table[, 1],
     exp_name = basename(tempfile("coverageSim-codon-bias-")),
     exp_save_dir = fixture$exp_dir,
-    seq_bias = load_seq_bias(type = "codon", shift = "p-site", bias = "all"),
+    seq_bias = load_seq_bias(type = "codon", shift = "p-site", bias = "R2"),
     libFormats = list(RFP = "ofst"),
     validate = FALSE
   )
