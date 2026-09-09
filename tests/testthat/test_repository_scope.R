@@ -7,8 +7,6 @@ test_that("Git excludes local analysis material but retains simulator sources", 
   system2("git", c("-C", shQuote(repository), "init", "--quiet"))
 
   excluded <- c(
-    "git_ignore/coverageSim_bias_overview.xlsx",
-    "git_ignore/CoverageSim.pdf",
     "choros/choros_utils.R",
     "rust_helpers/R/Learn_from_input.R",
     "tests/testthat/test_bias_overview_workbook.R",

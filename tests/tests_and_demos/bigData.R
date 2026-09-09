@@ -40,7 +40,10 @@ run_tag <- Sys.getenv(
 )
 out_root <- Sys.getenv(
   "COVSIM_BIGDATA_OUT_ROOT",
-  unset = "tests/tests_and_demos"
+  unset = file.path(
+    Sys.getenv("COVSIM_DATA_ROOT", unset = file.path(dirname(getwd()), "coverageSim_data")),
+    "runs"
+  )
 )
 out_base <- file.path(out_root, run_tag)
 
