@@ -74,6 +74,9 @@
 #' `"renormalize"` conditions probabilities on valid boundary geometry and
 #' preserves counts; `"error"` rejects impossible geometry. End-bias source
 #' fields are reserved and currently must be `list(source = "none")`.
+#' End-bias sources may also be `"user"` or `"learned"` with a table of
+#' `kmer`, `weight`, and optionally `fragment_length`; use
+#' \code{make_synthetic_end_bias()} to create a simple explicit profile.
 #' @param ground_truth FALSE, TRUE, or a directory path. In simulated-RPF mode, TRUE
 #' writes one compressed fragment truth table next to each simulated library.
 #' @param debug_coverage logical, default FALSE. If TRUE, debug steps of coverage calculation,

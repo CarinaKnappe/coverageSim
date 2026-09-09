@@ -38,16 +38,112 @@ normalize_fragment_geometry <- function(fragment_geometry) {
   }
   for (bias_name in c("five_prime_bias", "three_prime_bias")) {
     bias <- geometry[[bias_name]]
-    if (!is.list(bias) || !identical(names(bias), "source") ||
-        !bias$source %in% c("none", "default", "user", "learned")) {
-      stop("fragment_geometry$", bias_name,
-           " must be a list with source none, default, user, or learned")
-    }
-    if (bias$source != "none") {
-      stop(bias_name, " sources other than 'none' are reserved for a later implementation")
-    }
+    geometry[[bias_name]] <- normalize_end_bias(bias, bias_name)
   }
   geometry
+}
+
+validate_end_bias_table <- function(table, bias_name = "end bias") {
+  table <- data.table::as.data.table(table)
+  if (!all(c("kmer", "weight") %in% names(table))) {
+    stop(bias_name, " table requires columns: kmer, weight")
+  }
+  if (anyNA(table$kmer) || any(!grepl("^[ACGT]+$", toupper(table$kmer))) ||
+      any(!is.finite(table$weight)) || any(table$weight <= 0)) {
+    stop(bias_name, " weights must be finite and strictly positive, with DNA k-mers")
+  }
+  table[, kmer := toupper(as.character(kmer))]
+  if ("fragment_length" %in% names(table)) {
+    if (anyNA(table$fragment_length) || any(table$fragment_length <= 0 |
+                                             table$fragment_length != as.integer(table$fragment_length))) {
+      stop(bias_name, " fragment_length must contain positive integers")
+    }
+    table[, fragment_length := as.integer(fragment_length)]
+  } else table[, fragment_length := NA_integer_]
+  if (anyDuplicated(table[, .(kmer, fragment_length)])) {
+    stop(bias_name, " table contains duplicate kmer/fragment_length rows")
+  }
+  table[, .(kmer, weight, fragment_length)]
+}
+
+normalize_end_bias <- function(bias, bias_name) {
+  if (!is.list(bias) || is.null(bias$source) || length(bias$source) != 1L ||
+      !bias$source %in% c("none", "default", "user", "learned")) {
+    stop("fragment_geometry$", bias_name,
+         " must specify source none, default, user, or learned")
+  }
+  if (bias$source %in% c("none", "default")) {
+    return(list(source = bias$source, table = NULL))
+  }
+  if (is.null(bias$table)) {
+    stop("fragment_geometry$", bias_name, " requires a kmer/weight table")
+  }
+  list(source = bias$source, table = validate_end_bias_table(bias$table, bias_name))
+}
+
+end_bias_weight <- function(sequence, fragment_length,
+                            five_bias, three_bias) {
+  lookup <- function(kmer, length_value, bias) {
+    if (is.null(bias$table)) return(1)
+    value <- toupper(kmer)
+    exact <- bias$table[kmer == value & fragment_length == length_value, weight]
+    if (length(exact)) return(exact[[1L]])
+    hit <- bias$table[kmer == value & is.na(fragment_length), weight]
+    if (!length(hit)) 1 else hit[[1L]]
+  }
+  extract_kmer <- function(bias, from_end = FALSE) {
+    if (is.null(bias$table)) return(NULL)
+    k <- unique(nchar(bias$table$kmer))
+    if (length(k) != 1L) stop("Each end-bias table must use one k-mer length")
+    if (from_end) substr(sequence, nchar(sequence) - k + 1L, nchar(sequence))
+    else substr(sequence, 1L, k)
+  }
+  lookup(extract_kmer(five_bias), fragment_length, five_bias) *
+    lookup(extract_kmer(three_bias, TRUE), fragment_length, three_bias)
+}
+
+end_bias_kmer <- function(sequence, bias, from_end = FALSE) {
+  if (is.null(bias$table)) return(NA_character_)
+  k <- unique(nchar(bias$table$kmer))
+  if (length(k) != 1L) stop("Each end-bias table must use one k-mer length")
+  if (from_end) substr(sequence, nchar(sequence) - k + 1L, nchar(sequence))
+  else substr(sequence, 1L, k)
+}
+
+#' Create a simple synthetic sequence-end bias profile.
+#'
+#' The returned table can be passed as `table` in `five_prime_bias` or
+#' `three_prime_bias`. Weights are relative sampling weights; 1 is neutral.
+#' @param k integer k-mer length.
+#' @param enriched_kmer optional k-mer to enrich.
+#' @param enriched_weight weight for `enriched_kmer`.
+#' @param depleted_kmer optional k-mer to deplete.
+#' @param depleted_weight weight for `depleted_kmer`.
+#' @return a data.table with `kmer` and `weight` columns.
+#' @export
+make_synthetic_end_bias <- function(k = 1L, enriched_kmer = "G",
+                                    enriched_weight = 2,
+                                    depleted_kmer = NULL,
+                                    depleted_weight = 0.5) {
+  if (length(k) != 1L || is.na(k) || k < 1 || k != as.integer(k)) {
+    stop("k must be one positive integer", call. = FALSE)
+  }
+  k <- as.integer(k)
+  kmers <- apply(expand.grid(rep(list(c("A", "C", "G", "T")), k)), 1L,
+                 paste0, collapse = "")
+  result <- data.table::data.table(kmer = kmers, weight = 1)
+  update <- function(kmer, new_weight) {
+    if (is.null(kmer)) return(invisible(NULL))
+    if (length(kmer) != 1L || nchar(kmer) != k ||
+        !grepl("^[ACGT]+$", toupper(kmer)) || !is.finite(new_weight) || new_weight <= 0) {
+      stop("Synthetic end-bias k-mers and weights are invalid", call. = FALSE)
+    }
+    value <- toupper(kmer)
+    result[kmer == value, weight := new_weight]
+  }
+  update(enriched_kmer, enriched_weight)
+  update(depleted_kmer, depleted_weight)
+  result[]
 }
 
 default_fragment_distribution <- function(fragment_lengths,
@@ -274,6 +370,25 @@ make_simulated_rpf_fragments <- function(signal_table, transcript_models,
         "; affected count: ", row$score
       )
     }
+    valid[, `:=`(
+      tx_start = site_tx - site_offset,
+      tx_end = site_tx - site_offset + fragment_length - 1L
+    )]
+    valid[, sequence := vapply(seq_len(.N), function(j) {
+      substr(model$sequence, tx_start[j], tx_end[j])
+    }, character(1))]
+    valid[, bias_weight := vapply(seq_len(.N), function(j) {
+      end_bias_weight(
+        sequence[j],
+        fragment_length[j], geometry$five_prime_bias, geometry$three_prime_bias
+      )
+    }, numeric(1))]
+    valid[, probability := probability / sum(probability)]
+    valid[, geometry_probability := probability]
+    valid[, probability := probability * bias_weight]
+    if (sum(valid$probability) <= 0) {
+      stop("End-bias weights exclude every feasible fragment", call. = FALSE)
+    }
     valid[, probability := probability / sum(probability)]
     allocation <- as.integer(stats::rmultinom(
       1L, size = as.integer(row$score), prob = valid$probability
@@ -284,7 +399,7 @@ make_simulated_rpf_fragments <- function(signal_table, transcript_models,
     data.table::rbindlist(lapply(seq_len(nrow(selected)), function(j) {
       fragment_length <- selected$fragment_length[j]
       site_offset <- selected$site_offset[j]
-      tx_start <- site_tx - site_offset
+      tx_start <- selected$tx_start[j]
       alignment <- transcript_fragment_alignment(
         model, tx_start, fragment_length
       )
@@ -308,8 +423,12 @@ make_simulated_rpf_fragments <- function(signal_table, transcript_models,
         fragment_length = fragment_length,
         site_offset = site_offset,
         site_reference = geometry$site_reference,
-        geometry_probability = selected$probability[j],
-        sequence = substr(model$sequence, tx_start, tx_end)
+        geometry_probability = selected$geometry_probability[j],
+        sequence = selected$sequence[j],
+        five_prime_kmer = end_bias_kmer(selected$sequence[j], geometry$five_prime_bias),
+        three_prime_kmer = end_bias_kmer(selected$sequence[j], geometry$three_prime_bias, TRUE),
+        end_bias_weight = selected$bias_weight[j],
+        final_probability = selected$probability[j]
       )
     }))
   })

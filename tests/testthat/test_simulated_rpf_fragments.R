@@ -234,7 +234,7 @@ test_that("former physical function names remain compatibility aliases", {
   expect_s4_class(alignments, "GAlignments")
 })
 
-test_that("end-bias API is neutral until an explicit model is implemented", {
+test_that("end-bias API accepts neutral defaults and validates explicit tables", {
   expect_no_error(normalize_fragment_geometry(list(
     source = "default",
     five_prime_bias = list(source = "none"),
@@ -245,6 +245,6 @@ test_that("end-bias API is neutral until an explicit model is implemented", {
       source = "default",
       five_prime_bias = list(source = "user")
     )),
-    "reserved"
+    "requires a kmer/weight table"
   )
 })

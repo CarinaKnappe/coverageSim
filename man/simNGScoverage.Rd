@@ -121,7 +121,9 @@ The former name `"physical"` remains as a deprecated compatibility alias.}
 site_offset, and probability columns, and `boundary_action`. The default
 `"renormalize"` conditions probabilities on valid boundary geometry and
 preserves counts; `"error"` rejects impossible geometry. End-bias source
-fields are reserved and currently must be `list(source = "none")`.}
+fields accept `"none"`, `"user"`, or `"learned"`; user/learned tables contain
+`kmer`, `weight`, and optionally `fragment_length`. Use
+\code{make_synthetic_end_bias()} for a simple explicit profile.}
 
 \item{ground_truth}{FALSE, TRUE, or a directory path. In simulated-RPF mode, TRUE
 writes one compressed fragment truth table next to each simulated library.}
