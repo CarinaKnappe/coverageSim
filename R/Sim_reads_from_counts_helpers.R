@@ -257,8 +257,8 @@ sequence_table_controller <- function() {
           dt_range[, genes := groupings(tile)]
           dt_range[, position := seq_len(.N), by = genes]
         }
-        dt_range <- if (exists("fragment_mode") && fragment_mode == "physical") {
-          append_rnase_to_physical_table(dt_range, rnase_bias, models)
+        dt_range <- if (exists("fragment_mode") && fragment_mode == "simulated_rpf") {
+          append_rnase_to_simulated_rpf_table(dt_range, rnase_bias, models)
         } else {
           append_rnase_to_dt(dt_range, lengths, rnase_bias)
         }

@@ -15,7 +15,10 @@ simGenome(
   trailer_length = rep.int(105, n),
   gene_names = paste0("ENSGTEST1000", seq(n)),
   tx_names = paste0("ENSTTEST1000", seq(n)),
-  seqnames = list(paste0("chr", seq(n)), paste0("chr", seq(23)))[[1]],
+  seqnames = NULL,
+  chromosome_layout = c("compact", "legacy_one_gene_per_contig"),
+  chromosome_count = 24L,
+  chromosome_weights = NULL,
   flank_length = 305,
   strand = c("+", sample(c("+", "-"), n - 1, replace = TRUE)),
   start_codons = "ATG",
@@ -50,7 +53,19 @@ only used any cds_exons > 1. Is the size excluding the '5 GT motif.}
 
 \item{tx_names}{= paste0("ENSTTEST1000", seq(n)),}
 
-\item{seqnames}{= \code{list(paste0("chr", seq(n)), paste0("chr", seq(23)))[[1]]},}
+\item{seqnames}{Character vector of chromosome names. When NULL,
+the default compact layout uses up to \code{chromosome_count} chromosomes.}
+
+\item{chromosome_layout}{Either \code{"compact"} (the default), which places
+multiple genes on chromosomes, or
+\code{"legacy_one_gene_per_contig"}, which recreates the historical
+\code{chr1}, ..., \code{chrN} layout. Only used when \code{seqnames} is NULL.}
+
+\item{chromosome_count}{Maximum number of chromosomes in the default compact
+layout.}
+
+\item{chromosome_weights}{Optional sampling weights controlling how genes are
+distributed among chromosomes. Must have one positive value per chromosome.}
 
 \item{flank_length}{= 305,}
 

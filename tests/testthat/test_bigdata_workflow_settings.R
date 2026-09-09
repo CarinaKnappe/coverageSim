@@ -5,6 +5,14 @@ test_that("bigData workflow uses higher RUST-compatible read depth", {
 
   script <- readLines(script_path, warn = FALSE)
   expect_true(any(grepl("COVSIM_BIGDATA_N_GENES", script, fixed = TRUE)))
+  expect_true(any(grepl("COVSIM_BIGDATA_BIAS_PROFILE", script, fixed = TRUE)))
+  expect_true(any(grepl(
+    'allowed_bias_profiles <- c("start_codon", "stop_codon", "similar")',
+    script, fixed = TRUE
+  )))
+  expect_true(any(grepl("bias = bias_profile", script, fixed = TRUE)))
+  expect_false(any(grepl('bias = "all"', script, fixed = TRUE)))
+  expect_true(any(grepl("simulation_settings.tsv", script, fixed = TRUE)))
   expect_true(any(grepl('unset = "3000"', script, fixed = TRUE)))
   expect_true(any(grepl("interceptMean = 6", script, fixed = TRUE)))
   expect_false(any(grepl("interceptMean = 4", script, fixed = TRUE)))

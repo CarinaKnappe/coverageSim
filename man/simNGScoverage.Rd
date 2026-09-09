@@ -29,7 +29,7 @@ simNGScoverage(
   true_uorf_ranges = "AUTO",
   uorf_prop_within_gene = "uniform",
   validate = TRUE,
-  fragment_mode = c("physical", "legacy_point"),
+  fragment_mode = c("simulated_rpf", "legacy_point", "physical"),
   fragment_geometry = list(source = "default", site_reference = "a_site", distribution =
     NULL, boundary_action = "renormalize", five_prime_bias = list(source = "none"),
     three_prime_bias = list(source = "none")),
@@ -108,11 +108,12 @@ in a folder with other libraries you made
 earlier, so then only validate when you create the ORFik experiment after the
 last sample is made.}
 
-\item{fragment_mode}{RFP representation. `"physical"` (default) creates
-complete transcript-derived fragments; `"legacy_point"` preserves the
-historical behavior where the simulated signal position is the read start.}
+\item{fragment_mode}{RFP representation. `"simulated_rpf"` (default) creates
+complete simulated transcript-derived RPFs; `"legacy_point"` preserves the
+historical behavior where the simulated signal position is the read start.
+The former name `"physical"` remains as a deprecated compatibility alias.}
 
-\item{fragment_geometry}{Named list controlling physical fragments. Supports
+\item{fragment_geometry}{Named list controlling simulated RPFs. Supports
 `source` (`"default"`, `"user"`, or `"learned"`), `site_reference`
 (`"p_site"` or `"a_site"`), a joint `distribution` with fragment_length,
 site_offset, and probability columns, and `boundary_action`. The default
@@ -120,7 +121,7 @@ site_offset, and probability columns, and `boundary_action`. The default
 preserves counts; `"error"` rejects impossible geometry. End-bias source
 fields are reserved and currently must be `list(source = "none")`.}
 
-\item{ground_truth}{FALSE, TRUE, or a directory path. In physical mode, TRUE
+\item{ground_truth}{FALSE, TRUE, or a directory path. In simulated-RPF mode, TRUE
 writes one compressed fragment truth table next to each simulated library.}
 
 \item{debug_coverage}{logical, default FALSE. If TRUE, debug steps of coverage calculation,

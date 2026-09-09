@@ -7,9 +7,17 @@ test_that("load_seq_bias returns the default AA p-site bias table", {
 
 test_that("load_seq_bias supports alternate built-in bias tables", {
   aa_stop <- load_seq_bias(bias = "stop_codon")
+  codon_start <- load_seq_bias(
+    type = "codon", shift = "a-site", bias = "start_codon"
+  )
+  codon_similar <- load_seq_bias(
+    type = "codon", shift = "a-site", bias = "similar"
+  )
   codon_all <- load_seq_bias(type = "codon", shift = "a-site", bias = "all")
 
   expect_equal(unique(aa_stop$variable), "R1")
+  expect_equal(unique(codon_start$variable), "R2")
+  expect_equal(unique(codon_similar$variable), "R10")
   expect_true(length(unique(codon_all$variable)) > 1)
 })
 

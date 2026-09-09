@@ -23,6 +23,11 @@ Simulation project for ribo-seq coverage analysis.
 - identify which capability is missing (filesystem, network, system libs, etc.)
 - propose a sandbox-compatible alternative if possible
 - ask for confirmation before proceeding
+- Exception for read-only repository inspection: if a sandbox command fails
+  because the sandbox itself cannot start, Codex may retry the same command
+  outside the sandbox without asking for confirmation. This exception applies
+  only to commands that read local repository state and do not modify files,
+  install software, access the network, or contact external services.
 
 ## Running code
 - Always use `devtools::load_all()` when working with coverageSim.

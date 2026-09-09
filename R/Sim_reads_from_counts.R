@@ -61,17 +61,18 @@
 #' in a folder with other libraries you made
 #' earlier, so then only validate when you create the ORFik experiment after the
 #' last sample is made.
-#' @param fragment_mode RFP representation. `"physical"` (default) creates
-#' complete transcript-derived fragments; `"legacy_point"` preserves the
+#' @param fragment_mode RFP representation. `"simulated_rpf"` (default) creates
+#' complete simulated transcript-derived RPFs; `"legacy_point"` preserves the
 #' historical behavior where the simulated signal position is the read start.
-#' @param fragment_geometry Named list controlling physical fragments. Supports
+#' The former name `"physical"` remains as a deprecated compatibility alias.
+#' @param fragment_geometry Named list controlling simulated RPFs. Supports
 #' `source` (`"default"`, `"user"`, or `"learned"`), `site_reference`
 #' (`"p_site"` or `"a_site"`), a joint `distribution` with fragment_length,
 #' site_offset, and probability columns, and `boundary_action`. The default
 #' `"renormalize"` conditions probabilities on valid boundary geometry and
 #' preserves counts; `"error"` rejects impossible geometry. End-bias source
 #' fields are reserved and currently must be `list(source = "none")`.
-#' @param ground_truth FALSE, TRUE, or a directory path. In physical mode, TRUE
+#' @param ground_truth FALSE, TRUE, or a directory path. In simulated-RPF mode, TRUE
 #' writes one compressed fragment truth table next to each simulated library.
 #' @param debug_coverage logical, default FALSE. If TRUE, debug steps of coverage calculation,
 #' for parameter errors or just to understand how it all works.
@@ -116,7 +117,7 @@ simNGScoverage <- function(simGenome,
                            seq_bias = load_seq_bias(),
                            true_uorf_ranges = "AUTO", uorf_prop_within_gene = "uniform",
                            validate = TRUE,
-                           fragment_mode = c("physical", "legacy_point"),
+                           fragment_mode = c("simulated_rpf", "legacy_point", "physical"),
                            fragment_geometry = list(
                              source = "default", site_reference = "a_site",
                              distribution = NULL, boundary_action = "renormalize",
@@ -126,12 +127,16 @@ simNGScoverage <- function(simGenome,
                            ground_truth = FALSE,
                            debug_coverage = FALSE) {
   fragment_mode <- match.arg(fragment_mode)
+  if (fragment_mode == "physical") {
+    warning("fragment_mode = 'physical' is deprecated; use 'simulated_rpf'")
+    fragment_mode <- "simulated_rpf"
+  }
   fragment_geometry <- normalize_fragment_geometry(fragment_geometry)
   input_validation_controller()
 
   # Load annotation
   txdb <- loadTxdb(simGenome["txdb"])
-  if (fragment_mode == "physical") {
+  if (fragment_mode == "simulated_rpf") {
     mrna_ranges <- loadRegion(txdb, "mrna", names.keep = transcripts)
     models <- transcript_models(mrna_ranges, simGenome["genome"])
   }
@@ -179,16 +184,16 @@ simNGScoverage <- function(simGenome,
     count_check[is.na(count_check)] <- 0
     stopifnot(all(count_check$expected == count_check$actual))
     dt_final <- dt_final[score > 0,]
-    physical_rfp <- fragment_mode == "physical" && libtypes[s] == "RFP"
-    if (physical_rfp) {
-      fragment_table <- make_physical_fragments(
+    simulated_rpf <- fragment_mode == "simulated_rpf" && libtypes[s] == "RFP"
+    if (simulated_rpf) {
+      fragment_table <- make_simulated_rpf_fragments(
         dt_final,
         transcript_models = models,
         fragment_lengths = unlist(read_lengths_per[libtypes[s]], use.names = FALSE),
         fragment_geometry = fragment_geometry
       )
       stopifnot(sum(fragment_table$score) == sum(dt_final$score))
-      gr_final <- physical_fragment_alignments(
+      gr_final <- simulated_rpf_alignments(
         fragment_table,
         seqinfo = GenomeInfoDb::seqinfo(mrna_ranges)
       )
@@ -199,10 +204,10 @@ simNGScoverage <- function(simGenome,
     }
     format <- resolve_export_format(libFormats, libtypes[s])
     file_base <- file.path(out_dir, assay_column)
-    if (physical_rfp) {
+    if (simulated_rpf) {
       write_fragment_ground_truth(fragment_table, file_base, ground_truth)
     } else if (!identical(ground_truth, FALSE) && !is.null(ground_truth)) {
-      warning("Ground truth is currently written only for physical RFP libraries")
+      warning("Ground truth is currently written only for simulated RPF libraries")
     }
     written_files <- write_simulated_library(
       gr_final,

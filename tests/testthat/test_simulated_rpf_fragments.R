@@ -37,9 +37,9 @@ make_fragment_signals <- function(scores = c(2L, 3L)) {
   )
 }
 
-test_that("physical fragments preserve site geometry, sequence, and strand", {
+test_that("simulated RPFs preserve site geometry, sequence, and strand", {
   fixture <- make_fragment_fixture()
-  fragments <- make_physical_fragments(
+  fragments <- make_simulated_rpf_fragments(
     make_fragment_signals(), fixture$models, 8L,
     list(source = "user", site_offset = 2L, boundary_action = "error")
   )
@@ -69,13 +69,13 @@ test_that("physical fragments preserve site geometry, sequence, and strand", {
   expect_equal(fragments$sequence, unname(expected))
 })
 
-test_that("OFST and BAM represent the same physical fragments", {
+test_that("OFST and BAM represent the same simulated RPFs", {
   fixture <- make_fragment_fixture()
-  fragments <- make_physical_fragments(
+  fragments <- make_simulated_rpf_fragments(
     make_fragment_signals(), fixture$models, 8L,
     list(source = "user", site_offset = 2L, boundary_action = "error")
   )
-  alignments <- physical_fragment_alignments(
+  alignments <- simulated_rpf_alignments(
     fragments, GenomeInfoDb::seqinfo(fixture$transcripts)
   )
   expect_equal(
@@ -124,7 +124,7 @@ test_that("boundary failures report affected counts instead of dropping them", {
   edge <- make_fragment_signals(scores = c(7L, 0L))[1]
   edge[, `:=`(start = 101L, end = 101L, signal_position = 101L)]
   expect_error(
-    make_physical_fragments(
+    make_simulated_rpf_fragments(
       edge, fixture$models, 8L,
       list(source = "user", site_offset = 2L, boundary_action = "error")
     ),
@@ -132,9 +132,9 @@ test_that("boundary failures report affected counts instead of dropping them", {
   )
 })
 
-test_that("ground truth contains neutral physical-fragment fields", {
+test_that("ground truth contains neutral simulated-RPF fields", {
   fixture <- make_fragment_fixture()
-  fragments <- make_physical_fragments(
+  fragments <- make_simulated_rpf_fragments(
     make_fragment_signals(), fixture$models, 8L,
     list(source = "user", site_offset = 2L, boundary_action = "error")
   )
@@ -159,7 +159,7 @@ test_that("joint geometry probabilities split counts without breaking coupling",
   )
 
   set.seed(42)
-  fragments <- make_physical_fragments(
+  fragments <- make_simulated_rpf_fragments(
     signal, fixture$models, fragment_lengths = 8:9,
     fragment_geometry = list(
       source = "user", site_reference = "p_site",
@@ -187,7 +187,7 @@ test_that("default A-site offsets are three nucleotides beyond P-site offsets", 
   expect_equal(a_site$probability, p_site$probability)
 })
 
-test_that("physical fragment geometry defaults to A-site", {
+test_that("simulated RPF geometry defaults to A-site", {
   geometry <- normalize_fragment_geometry(NULL)
   default_distribution <- default_fragment_distribution(28:30)
   explicit_a_site <- default_fragment_distribution(28:30, "a_site")
@@ -205,7 +205,7 @@ test_that("boundary renormalization preserves all counts", {
     site_offset = c(2L, 6L),
     probability = c(0.25, 0.75)
   )
-  fragments <- make_physical_fragments(
+  fragments <- make_simulated_rpf_fragments(
     edge, fixture$models, 8L,
     list(source = "learned", distribution = distribution,
          boundary_action = "renormalize")
@@ -214,6 +214,24 @@ test_that("boundary renormalization preserves all counts", {
   expect_equal(sum(fragments$score), 101L)
   expect_equal(fragments$site_offset, 2L)
   expect_equal(fragments$geometry_probability, 1)
+})
+
+test_that("former physical function names remain compatibility aliases", {
+  fixture <- make_fragment_fixture()
+  expect_warning(
+    fragments <- make_physical_fragments(
+      make_fragment_signals(), fixture$models, 8L,
+      list(source = "user", site_offset = 2L, boundary_action = "error")
+    ),
+    "deprecated"
+  )
+  expect_warning(
+    alignments <- physical_fragment_alignments(
+      fragments, GenomeInfoDb::seqinfo(fixture$transcripts)
+    ),
+    "deprecated"
+  )
+  expect_s4_class(alignments, "GAlignments")
 })
 
 test_that("end-bias API is neutral until an explicit model is implemented", {

@@ -1,3 +1,18 @@
+resolve_simulated_seqnames <- function(n, seqnames, chromosome_layout,
+                                       chromosome_count) {
+  if (!is.null(seqnames)) {
+    return(as.character(seqnames))
+  }
+  if (identical(chromosome_layout, "legacy_one_gene_per_contig")) {
+    return(paste0("chr", seq_len(n)))
+  }
+  if (length(chromosome_count) != 1L || is.na(chromosome_count) ||
+      chromosome_count < 1L) {
+    stop("chromosome_count must be one positive integer")
+  }
+  paste0("chr", seq_len(min(n, as.integer(chromosome_count))))
+}
+
 genome_input_test_controller <- function() {
   with(rlang::caller_env(),{
     # Sanity tests for input
@@ -12,6 +27,13 @@ genome_input_test_controller <- function() {
     stopifnot(length(gene_names) == length(unique(gene_names)))
     stopifnot(length(tx_names) == length(unique(tx_names)))
     stopifnot(length(seqnames) <= n)
+    if (!is.null(chromosome_weights)) {
+      if (length(chromosome_weights) != length(seqnames) ||
+          any(!is.finite(chromosome_weights)) ||
+          any(chromosome_weights <= 0)) {
+        stop("chromosome_weights must contain one positive finite value per chromosome")
+      }
+    }
     stopifnot(length(uorfs_can_overlap_cds) == 1)
     stopifnot(uorfs_can_overlap_cds %in% seq(0, 2))
     stopifnot(min(cds_length) >= 9 & min(cds_length) > cds_exons & (min(cds_length) >= uorf_max_length + 3))
@@ -141,8 +163,15 @@ genome_exon_flanks_controller <- function() {
     flank_length <- rep_len(flank_length, n)
     if (length(seqnames) < n) { #Decide which genes are on same chromosomes
       gene_seqnames <- seq.int(length(seqnames)) #Make sure each chr get at least 1
-      gene_seqnames <- sort(c(gene_seqnames,
-                              sample(length(seqnames), n - length(seqnames), replace = TRUE)))
+      gene_seqnames <- sort(c(
+        gene_seqnames,
+        sample(
+          length(seqnames),
+          n - length(seqnames),
+          replace = TRUE,
+          prob = chromosome_weights
+        )
+      ))
       seqnames <- seqnames[gene_seqnames]
       dt <- data.table::data.table(seqnames = gene_seqnames, strand, gene_and_intergenic_len)
       dt[, flank3_gene_end := cumsum(gene_and_intergenic_len), by = seqnames]
@@ -194,7 +223,11 @@ make_genome_sequences_controller <- function() {
     if (length(names(chromosome_seqs)) != length(unique(names(chromosome_seqs)))) {
       # Merge the genetic regions of same chromosomes
       chromosome_seqs <- split(chromosome_seqs, names(chromosome_seqs))
-      chromosome_seqs <- DNAStringSet(lapply(a, function(x) unlist(x, use.names = FALSE)))
+      chromosome_seqs <- DNAStringSet(vapply(
+        chromosome_seqs,
+        function(x) paste0(as.character(x), collapse = ""),
+        character(1)
+      ))
       chromosome_seqs <- chromosome_seqs[unique(seqnames)]
     }
   })

@@ -19,7 +19,16 @@
 #' @param trailer_length = rep.int(105, n),
 #' @param gene_names = paste0("ENSGTEST1000", seq(n)),
 #' @param tx_names = paste0("ENSTTEST1000", seq(n)),
-#' @param seqnames = \code{list(paste0("chr", seq(n)), paste0("chr", seq(23)))[[1]]},
+#' @param seqnames Character vector of chromosome names. When NULL,
+#'   the default compact layout uses up to \code{chromosome_count} chromosomes.
+#' @param chromosome_layout Either \code{"compact"} (the default), which places
+#'   multiple genes on chromosomes, or
+#'   \code{"legacy_one_gene_per_contig"}, which recreates the historical
+#'   \code{chr1}, ..., \code{chrN} layout. Only used when \code{seqnames} is NULL.
+#' @param chromosome_count Maximum number of chromosomes in the default compact
+#'   layout.
+#' @param chromosome_weights Optional sampling weights controlling how genes are
+#'   distributed among chromosomes. Must have one positive value per chromosome.
 #' @param flank_length = 305,
 #' @param strand = c("+", sample(c("+", "-"), n-1, replace = T)),
 #' @param start_codons = "ATG",
@@ -53,7 +62,10 @@ simGenome <- function(n = 500,
                       trailer_length = rep.int(105, n),
                       gene_names = paste0("ENSGTEST1000", seq(n)),
                       tx_names = paste0("ENSTTEST1000", seq(n)),
-                      seqnames = list(paste0("chr", seq(n)), paste0("chr", seq(23)))[[1]],
+                      seqnames = NULL,
+                      chromosome_layout = c("compact", "legacy_one_gene_per_contig"),
+                      chromosome_count = 24L,
+                      chromosome_weights = NULL,
                       flank_length = 305,
                       strand = c("+", sample(c("+", "-"), n-1, replace = TRUE)),
                       start_codons = "ATG",
@@ -64,6 +76,13 @@ simGenome <- function(n = 500,
                       uorf_max_length = 60,
                       export_txdb = TRUE,
                       debug_on = TRUE) {
+  chromosome_layout <- match.arg(chromosome_layout)
+  seqnames <- resolve_simulated_seqnames(
+    n = n,
+    seqnames = seqnames,
+    chromosome_layout = chromosome_layout,
+    chromosome_count = chromosome_count
+  )
   genome_input_test_controller()
   genome_exon_flanks_controller()
 

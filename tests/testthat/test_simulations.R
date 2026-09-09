@@ -1,7 +1,8 @@
 make_simulation_fixture <- function(max_uorfs = 0,
                                     regions = "cds",
                                     region_proportion = NULL,
-                                    export_txdb = TRUE) {
+                                    export_txdb = TRUE,
+                                    seqnames = NULL) {
   genome_dir <- tempfile("coverageSim-genome-")
   exp_dir <- tempfile("coverageSim-exp-")
   dir.create(genome_dir)
@@ -13,6 +14,7 @@ make_simulation_fixture <- function(max_uorfs = 0,
     genome_name = paste0("artificial_uorf_", max_uorfs),
     max_uorfs = max_uorfs,
     cds_length = c(rep.int(330, 3), rep.int(300, 3)),
+    seqnames = seqnames,
     export_txdb = export_txdb
   ))
 
@@ -79,6 +81,127 @@ test_that("simGenome exports the expected files for coding-only genomes", {
   expect_true(all(file.exists(unname(fixture$sim_genome))))
   expect_s4_class(ORFik::loadTxdb(fixture$sim_genome["txdb"]), "TxDb")
   expect_true(all(ORFik::widthPerGroup(fixture$cds, FALSE) %% 3 == 0))
+})
+
+test_that("simGenome places multiple genes on compact chromosomes", {
+  genome_dir <- tempfile("coverageSim-compact-genome-")
+  dir.create(genome_dir)
+
+  set.seed(101)
+  simulated <- suppressWarnings(simGenome(
+    n = 30,
+    out_dir = genome_dir,
+    genome_name = "compact_genome",
+    max_uorfs = 0,
+    export_txdb = FALSE,
+    debug_on = FALSE
+  ))
+
+  genome <- Biostrings::readDNAStringSet(simulated[["genome"]])
+  annotation <- rtracklayer::import(simulated[["gtf"]])
+  genes <- annotation[annotation$type == "gene"]
+
+  expect_length(genome, 24L)
+  expect_equal(names(genome), paste0("chr", seq_len(24L)))
+  expect_length(genes, 30L)
+  expect_true(any(table(as.character(GenomicRanges::seqnames(genes))) > 1L))
+  expect_true(all(vapply(
+    split(genes, GenomicRanges::seqnames(genes)),
+    function(x) GenomicRanges::isDisjoint(x, ignore.strand = TRUE),
+    logical(1)
+  )))
+  genome_widths <- stats::setNames(Biostrings::width(genome), names(genome))
+  maximum_gene_ends <- tapply(
+    GenomicRanges::end(genes),
+    as.character(GenomicRanges::seqnames(genes)),
+    max
+  )
+  expect_true(all(
+    maximum_gene_ends < genome_widths[names(maximum_gene_ends)]
+  ))
+})
+
+test_that("simGenome supports explicit chromosomes and weighted gene assignment", {
+  genome_dir <- tempfile("coverageSim-weighted-genome-")
+  dir.create(genome_dir)
+
+  set.seed(102)
+  simulated <- suppressWarnings(simGenome(
+    n = 12,
+    out_dir = genome_dir,
+    genome_name = "weighted_genome",
+    seqnames = c("chrA", "chrB"),
+    chromosome_weights = c(1, 0.01),
+    max_uorfs = 0,
+    export_txdb = FALSE,
+    debug_on = FALSE
+  ))
+
+  genome <- Biostrings::readDNAStringSet(simulated[["genome"]])
+  annotation <- rtracklayer::import(simulated[["gtf"]])
+  genes <- annotation[annotation$type == "gene"]
+
+  expect_equal(names(genome), c("chrA", "chrB"))
+  expect_setequal(as.character(GenomicRanges::seqnames(genes)), names(genome))
+  expect_gt(sum(as.character(GenomicRanges::seqnames(genes)) == "chrA"),
+            sum(as.character(GenomicRanges::seqnames(genes)) == "chrB"))
+})
+
+test_that("simGenome retains the legacy one-gene-per-contig layout", {
+  genome_dir <- tempfile("coverageSim-legacy-genome-")
+  dir.create(genome_dir)
+
+  simulated <- suppressWarnings(simGenome(
+    n = 5,
+    out_dir = genome_dir,
+    genome_name = "legacy_genome",
+    chromosome_layout = "legacy_one_gene_per_contig",
+    max_uorfs = 0,
+    export_txdb = FALSE,
+    debug_on = FALSE
+  ))
+
+  genome <- Biostrings::readDNAStringSet(simulated[["genome"]])
+  annotation <- rtracklayer::import(simulated[["gtf"]])
+  genes <- annotation[annotation$type == "gene"]
+
+  expect_equal(names(genome), paste0("chr", seq_len(5L)))
+  gene_counts <- table(as.character(GenomicRanges::seqnames(genes)))
+  expect_equal(names(gene_counts), paste0("chr", seq_len(5L)))
+  expect_equal(as.integer(gene_counts), rep.int(1L, 5L))
+})
+
+test_that("multiple transcripts on one chromosome retain counts through BAM export", {
+  set.seed(103)
+  fixture <- make_simulation_fixture(
+    max_uorfs = 1,
+    regions = c("cds", "uorf"),
+    region_proportion = list(
+      cds = list(RFP = 0.9),
+      uorf = list(RFP = 0.1)
+    ),
+    seqnames = "chr1"
+  )
+  experiment <- run_simulated_experiment(
+    fixture,
+    lib_formats = list(RFP = "bam"),
+    ground_truth = TRUE
+  )
+
+  bam_path <- ORFik::filepath(experiment, "default")[1]
+  truth_path <- sub("[.]bam$", "_ground_truth.tsv", bam_path)
+  truth <- data.table::fread(truth_path)
+  bam <- Rsamtools::scanBam(
+    bam_path,
+    param = Rsamtools::ScanBamParam(what = c("rname", "qname"))
+  )[[1]]
+  expected <- sum(SummarizedExperiment::assay(fixture$region_count_table[, 1], "cds")) +
+    sum(SummarizedExperiment::assay(fixture$region_count_table[, 1], "uorf"))
+
+  expect_equal(sum(truth$score), expected)
+  expect_equal(length(bam$qname), expected)
+  expect_equal(unique(as.character(bam$rname)), "chr1")
+  expect_gt(data.table::uniqueN(truth$transcript_id), 1L)
 })
 
 test_that("simGenome supports multiple uORFs per transcript", {

@@ -18,9 +18,25 @@ if (is.na(n_genes) || n_genes < 1L) {
   stop("COVSIM_BIGDATA_N_GENES must be a positive integer")
 }
 
+bias_profile <- Sys.getenv(
+  "COVSIM_BIGDATA_BIAS_PROFILE", unset = "start_codon"
+)
+allowed_bias_profiles <- c("start_codon", "stop_codon", "similar")
+if (!bias_profile %in% allowed_bias_profiles) {
+  stop(
+    "COVSIM_BIGDATA_BIAS_PROFILE must select one profile: ",
+    paste(allowed_bias_profiles, collapse = ", ")
+  )
+}
+bias_profile_id <- c(
+  start_codon = "R2", stop_codon = "R1", similar = "R10"
+)[[bias_profile]]
+
 run_tag <- Sys.getenv(
   "COVSIM_BIGDATA_RUN_TAG",
-  unset = paste0(n_genes, "_genes_physical_asite")
+  unset = paste0(
+    n_genes, "_genes_simulated_rpf_asite_", bias_profile
+  )
 )
 out_root <- Sys.getenv(
   "COVSIM_BIGDATA_OUT_ROOT",
@@ -36,6 +52,15 @@ dir.create(file.path(out_base, "experiment"), recursive = TRUE, showWarnings = F
 seed <- as.integer(Sys.getenv("COVSIM_BIGDATA_SEED", unset = "42"))
 set.seed(seed)
 
+data.table::fwrite(
+  data.table::data.table(
+    setting = c("n_genes", "seed", "bias_profile", "bias_profile_id"),
+    value = c(n_genes, seed, bias_profile, bias_profile_id)
+  ),
+  file.path(out_base, "simulation_settings.tsv"),
+  sep = "\t"
+)
+
 n_reps  <- 2
 conds   <- c("WT", "KO")
 
@@ -48,6 +73,8 @@ sim_genome <- simGenome(
   n = n_genes,
   out_dir = file.path(out_base, "genome"),
   genome_name = "human_flavoured_sim",
+  chromosome_layout = "compact",
+  chromosome_count = 24L,
   leader_length = leader_length,
   cds_length = cds_length,
   trailer_length = trailer_length,
@@ -120,7 +147,7 @@ exp <- simNGScoverage(
   seq_bias = load_seq_bias(
     type = "codon",
     shift = "a-site",
-    bias = "all"
+    bias = bias_profile
   ),
   auto_correlation = list(
     cds = list(RFP = shapes(9)),

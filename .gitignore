@@ -18,3 +18,14 @@ tests/tests_and_demos/*_G_end_dropout_summary.csv
 
 # Large external human input/output dataset; store outside the repository.
 tests/tests_and_demos/real_human_riboseq/
+
+# Local manuscripts, planning material, and separately maintained analyses.
+/git_ignore/
+/choros/
+/rust_helpers/
+/tests/testthat/test_bias_overview_workbook.R
+/tests/testthat/test_choros_scripts.R
+/tests/testthat/test_rust_helpers_separation.R
+/tests/testthat/test_deprecated_dataset_layout.R
+/tests/tests_and_demos/Parameter_settings_per_run.ods
+/tests/tests_and_demos/learn_from_HumanGenome.R

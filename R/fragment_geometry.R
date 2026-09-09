@@ -116,7 +116,7 @@ resolve_fragment_distribution <- function(fragment_lengths, geometry) {
     return(validate_fragment_distribution(distribution))
   }
   if (geometry$source == "none") {
-    stop("Physical fragments require a default, user, or learned geometry source")
+    stop("Simulated RPFs require a default, user, or learned geometry source")
   }
   default_fragment_distribution(fragment_lengths, geometry$site_reference)
 }
@@ -170,8 +170,8 @@ transcript_position_to_genomic <- function(model, transcript_position) {
   }
 }
 
-append_rnase_to_physical_table <- function(dt_range, rnase_bias,
-                                           transcript_models) {
+append_rnase_to_simulated_rpf_table <- function(dt_range, rnase_bias,
+                                                transcript_models) {
   reach <- floor(length(rnase_bias[["RFP"]]) / 2L)
   if (reach == 0L) return(dt_range)
   groups <- split(dt_range, dt_range$genes, keep.by = TRUE)
@@ -235,12 +235,12 @@ transcript_fragment_alignment <- function(model, transcript_start,
   )
 }
 
-make_physical_fragments <- function(signal_table, transcript_models,
-                                    fragment_lengths, fragment_geometry) {
+make_simulated_rpf_fragments <- function(signal_table, transcript_models,
+                                         fragment_lengths, fragment_geometry) {
   geometry <- normalize_fragment_geometry(fragment_geometry)
   candidates <- resolve_fragment_distribution(fragment_lengths, geometry)
   if (any(signal_table$score < 0 | signal_table$score != as.integer(signal_table$score))) {
-    stop("Physical fragment scores must be non-negative integers")
+    stop("Simulated RPF scores must be non-negative integers")
   }
 
   rows <- lapply(seq_len(nrow(signal_table)), function(i) {
@@ -318,7 +318,7 @@ make_physical_fragments <- function(signal_table, transcript_models,
   result
 }
 
-physical_fragment_alignments <- function(fragment_table, seqinfo) {
+simulated_rpf_alignments <- function(fragment_table, seqinfo) {
   GenomicAlignments::GAlignments(
     seqnames = fragment_table$seqnames,
     pos = fragment_table$start,
@@ -340,6 +340,25 @@ physical_fragment_alignments <- function(fragment_table, seqinfo) {
     geometry_probability = fragment_table$geometry_probability,
     sequence = fragment_table$sequence
   )
+}
+
+# Compatibility aliases for scripts written before the simulated-RPF naming.
+make_physical_fragments <- function(...) {
+  warning("make_physical_fragments() is deprecated; use make_simulated_rpf_fragments()")
+  make_simulated_rpf_fragments(...)
+}
+
+physical_fragment_alignments <- function(...) {
+  warning("physical_fragment_alignments() is deprecated; use simulated_rpf_alignments()")
+  simulated_rpf_alignments(...)
+}
+
+append_rnase_to_physical_table <- function(...) {
+  warning(paste0(
+    "append_rnase_to_physical_table() is deprecated; use ",
+    "append_rnase_to_simulated_rpf_table()"
+  ))
+  append_rnase_to_simulated_rpf_table(...)
 }
 
 write_fragment_ground_truth <- function(fragment_table, file_base,
