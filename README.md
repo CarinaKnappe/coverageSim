@@ -136,3 +136,6 @@ Length probabilities, frame noise and region proportions are not learned by this
 function. Coverage roughness is estimated from transcript-level overdispersion
 after accounting for fitted codon and end preferences. Strong position-specific
 biological effects or unmodelled mapping biases can still affect the estimate.
+The fit also returns a non-negative codon autocorrelation kernel and auditable
+zero, spike, peak and gap summaries. Pass the kernel as the RFP value in
+`auto_correlation`; use the QC tables to compare real and simulated libraries.

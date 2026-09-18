@@ -16,7 +16,8 @@ learn_end_bias(
   ridge = 1,
   maxit = 500L,
   dmn_min_reads = 50L,
-  dmn_min_sites = 20L
+  dmn_min_sites = 20L,
+  acf_max_lag = 9L
 )
 }
 \arguments{
@@ -51,6 +52,9 @@ Dirichlet-multinomial concentration. Default 50.}
 
 \item{dmn_min_sites}{Minimum CDS codon opportunities per transcript for
 estimating the concentration. Default 20.}
+
+\item{acf_max_lag}{Maximum codon lag used to learn local coverage
+autocorrelation. Default 9.}
 }
 \value{
 A list containing five_prime_bias and three_prime_bias, ready to place

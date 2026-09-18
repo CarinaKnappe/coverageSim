@@ -25,6 +25,8 @@
 #'   Dirichlet-multinomial concentration. Default 50.
 #' @param dmn_min_sites Minimum CDS codon opportunities per transcript for
 #'   estimating the concentration. Default 20.
+#' @param acf_max_lag Maximum codon lag used to learn local coverage
+#'   autocorrelation. Default 9.
 #' @return A list containing five_prime_bias and three_prime_bias, ready to place
 #'   in fragment_geometry, plus sequence_bias and dmn_alpha_scale for Step 4,
 #'   diagnostics and provenance. Passing sequence_bias to simNGScoverage() lets
@@ -38,10 +40,11 @@
 learn_end_bias <- function(bam, fasta, transcripts, cds, fragment_geometry,
                            k = 1L, by_length = FALSE, min_mapq = 20,
                            ridge = 1, maxit = 500L,
-                           dmn_min_reads = 50L, dmn_min_sites = 20L) {
+                           dmn_min_reads = 50L, dmn_min_sites = 20L,
+                           acf_max_lag = 9L) {
   validate_end_learning_input(bam, fasta, transcripts, cds, k, by_length,
                               min_mapq, ridge, maxit,
-                              dmn_min_reads, dmn_min_sites)
+                              dmn_min_reads, dmn_min_sites, acf_max_lag)
   geometry <- normalize_fragment_geometry(fragment_geometry)
   if (is.null(geometry$distribution)) {
     stop("Learning requires an explicit length/offset distribution")
@@ -62,11 +65,15 @@ learn_end_bias <- function(bam, fasta, transcripts, cds, fragment_geometry,
   dispersion <- estimate_dmn_alpha_from_opportunities(
     counted$data, fit, dmn_min_reads, dmn_min_sites
   )
+  structure <- learn_coverage_structure(dispersion$sites, acf_max_lag)
   fit$dmn_alpha_scale <- dispersion$scale
+  fit$auto_correlation <- structure$kernel
+  fit$coverage_qc <- structure$qc
   fit$sequence_bias <- learned_sequence_bias(
     fit$diagnostics$codon_weights, dispersion$scale
   )
   fit$diagnostics$dmn_alpha <- dispersion$diagnostics
+  fit$diagnostics$auto_correlation <- structure$acf
   fit$diagnostics$reads <- c(observed$diagnostics, counted$diagnostics)
   fit$provenance <- list(
     bam = normalizePath(bam), fasta = normalizePath(fasta),
@@ -74,8 +81,10 @@ learn_end_bias <- function(bam, fasta, transcripts, cds, fragment_geometry,
     site_reference = geometry$site_reference, k = k, by_length = by_length,
     min_mapq = min_mapq, ridge = ridge, maxit = maxit,
     dmn_min_reads = dmn_min_reads, dmn_min_sites = dmn_min_sites,
+    acf_max_lag = acf_max_lag,
     model = paste("conditional multinomial: transcript:length + codon +",
-                  "5prime + 3prime; robust DMN moment concentration"),
+                  "5prime + 3prime; robust DMN moment concentration +",
+                  "residual codon autocorrelation"),
     created = as.character(Sys.time()), package_version = as.character(utils::packageVersion("coverageSim"))
   )
   class(fit) <- c("covsim_end_bias_fit", "list")
@@ -84,7 +93,8 @@ learn_end_bias <- function(bam, fasta, transcripts, cds, fragment_geometry,
 
 validate_end_learning_input <- function(bam, fasta, transcripts, cds, k,
                                         by_length, min_mapq, ridge, maxit,
-                                        dmn_min_reads, dmn_min_sites) {
+                                        dmn_min_reads, dmn_min_sites,
+                                        acf_max_lag) {
   for (path in list(bam, fasta)) {
     if (!is.character(path) || length(path) != 1L || !file.exists(path)) {
       stop("bam and fasta must name existing files")
@@ -114,6 +124,9 @@ validate_end_learning_input <- function(bam, fasta, transcripts, cds, k,
   }
   if (!scalar(dmn_min_sites, 2, Inf, TRUE)) {
     stop("dmn_min_sites must be an integer of at least two")
+  }
+  if (!scalar(acf_max_lag, 1, 100, TRUE)) {
+    stop("acf_max_lag must be an integer from one to 100")
   }
 }
 
@@ -245,7 +258,84 @@ estimate_dmn_alpha_from_opportunities <- function(opportunities, fit,
   } else {
     scale <- stats::median(usable)
   }
-  list(scale = scale, diagnostics = diagnostics)
+  list(scale = scale, diagnostics = diagnostics, sites = sites)
+}
+
+learn_coverage_structure <- function(sites, max_lag) {
+  autocorrelation <- estimate_residual_autocorrelation(sites, max_lag)
+  list(
+    kernel = autocorrelation$kernel,
+    acf = autocorrelation$diagnostics,
+    qc = coverage_roughness_qc(sites)
+  )
+}
+
+estimate_residual_autocorrelation <- function(sites, max_lag) {
+  data <- data.table::copy(sites)
+  data.table::setorder(data, transcript_id, site_tx)
+  data[, residual := (observed - expected) / sqrt(expected)]
+  per_transcript <- data[, {
+    n <- .N
+    data.table::rbindlist(lapply(seq_len(min(max_lag, n - 1L)), function(lag) {
+      left <- head(residual, -lag)
+      right <- tail(residual, -lag)
+      correlation <- if (stats::sd(left) > 0 && stats::sd(right) > 0) {
+        stats::cor(left, right)
+      } else {
+        NA_real_
+      }
+      data.table::data.table(lag = lag, correlation = correlation,
+                             pairs = length(left))
+    }))
+  }, by = transcript_id]
+  diagnostics <- per_transcript[is.finite(correlation), .(
+    correlation = stats::weighted.mean(correlation, pairs),
+    transcripts = .N,
+    pairs = sum(pairs)
+  ), by = lag]
+  diagnostics <- merge(
+    data.table::data.table(lag = seq_len(max_lag)), diagnostics,
+    by = "lag", all.x = TRUE, sort = TRUE
+  )
+  diagnostics[is.na(correlation), correlation := 0]
+  diagnostics[is.na(transcripts), `:=`(transcripts = 0L, pairs = 0L)]
+  neighbour_weights <- pmax(diagnostics$correlation, 0)
+  weights <- c(rev(neighbour_weights), 1, neighbour_weights)
+  weights <- weights / sum(weights)
+  names(weights) <- as.character(seq.int(-max_lag, max_lag))
+  class(weights) <- c("covsim_autocorrelation", class(weights))
+  list(kernel = weights, diagnostics = diagnostics)
+}
+
+coverage_roughness_qc <- function(sites) {
+  longest_run <- function(x) {
+    runs <- rle(x == 0)
+    if (!any(runs$values)) return(0L)
+    max(runs$lengths[runs$values])
+  }
+  data <- data.table::copy(sites)
+  data.table::setorder(data, transcript_id, site_tx)
+  per_transcript <- data[, .(
+    reads = sum(observed),
+    sites = .N,
+    zero_fraction = mean(observed == 0),
+    variance_to_mean = if (mean(observed) > 0) stats::var(observed) / mean(observed) else NA_real_,
+    peak_fraction = if (sum(observed) > 0) max(observed) / sum(observed) else NA_real_,
+    spike_fraction = mean(observed > stats::qpois(0.999, lambda = expected)),
+    longest_zero_run = longest_run(observed)
+  ), by = transcript_id]
+  measures <- setdiff(names(per_transcript), "transcript_id")
+  summary <- data.table::rbindlist(lapply(measures, function(measure) {
+    values <- per_transcript[[measure]]
+    values <- values[is.finite(values)]
+    data.table::data.table(
+      measure = measure,
+      median = if (length(values)) stats::median(values) else NA_real_,
+      q10 = if (length(values)) unname(stats::quantile(values, 0.1)) else NA_real_,
+      q90 = if (length(values)) unname(stats::quantile(values, 0.9)) else NA_real_
+    )
+  }))
+  list(per_transcript = per_transcript, summary = summary)
 }
 
 learned_sequence_bias <- function(codon_weights, dmn_alpha_scale) {

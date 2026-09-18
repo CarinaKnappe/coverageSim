@@ -450,6 +450,20 @@ add_sequence_bias <- function(simGenome, dt_range, tAI, region_ranges, lengths, 
 }
 
 
+apply_autocorrelation_kernel <- function(signal, kernel) {
+  if (!is.numeric(kernel) || !length(kernel) || length(kernel) %% 2L != 1L ||
+      any(!is.finite(kernel) | kernel < 0) || !any(kernel > 0)) {
+    stop("Numeric auto_correlation must be an odd, non-negative kernel")
+  }
+  radius <- (length(kernel) - 1L) %/% 2L
+  lags <- seq.int(-radius, radius)
+  vapply(seq_along(signal), function(i) {
+    positions <- i + lags
+    keep <- positions >= 1L & positions <= length(signal)
+    sum(signal[positions[keep]] * kernel[keep]) / sum(kernel[keep])
+  }, numeric(1))
+}
+
 sim_sequence_bias <- function(ideal_coverage, lengths, alpha_matrix,
                               seq_acf = 9, rnase_acf =
                                 c(0.5,1,2,6,2,1,0.5)) {
@@ -461,7 +475,9 @@ sim_sequence_bias <- function(ideal_coverage, lengths, alpha_matrix,
     res <- lapply(lengths, function(x) eval(ideal_coverage))
     alpha_means <- rep(mean(res[[1]]), length(res))
   }
-  if (!is.null(seq_acf)) { # Higher order auto correlation
+  if (is.numeric(seq_acf)) {
+    res <- lapply(res, apply_autocorrelation_kernel, kernel = seq_acf)
+  } else if (!is.null(seq_acf)) { # Higher order auto correlation
     if (!is.null(alpha_matrix)) { # Rescale alpha values
       scalers <- unlist(lapply(res, function(x) {
         codon_extreme <- max(x) / median(x)

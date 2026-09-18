@@ -60,6 +60,15 @@ test_that("DMN alpha defaults to one and learned profiles override it", {
   expect_error(resolve_dmn_alpha_scale(NULL, profile), "multiple")
 })
 
+test_that("numeric autocorrelation kernels smooth locally and validate input", {
+  signal <- c(0, 0, 9, 0, 0)
+  smoothed <- apply_autocorrelation_kernel(signal, c(1, 2, 1))
+  expect_equal(smoothed, c(0, 2.25, 4.5, 2.25, 0))
+  expect_equal(apply_autocorrelation_kernel(signal, 1), signal)
+  expect_error(apply_autocorrelation_kernel(signal, c(1, 1)), "odd")
+  expect_error(apply_autocorrelation_kernel(signal, c(1, -1, 1)), "non-negative")
+})
+
 test_that("load_seq_bias supports alternate built-in bias tables", {
   aa_stop <- load_seq_bias(bias = "stop_codon")
   codon_start <- load_seq_bias(

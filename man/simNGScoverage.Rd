@@ -69,7 +69,9 @@ cds = list(RFP = quote(abs(cos(seq(0, pi*(x/30), pi/30))) + 0.1), RNA = 1, CAGE 
 trailer = list(RFP = 1, RNA = 1, CAGE = 1, PAS = 1),
 uorf = list(RFP = quote(abs(cos(seq(0, pi*(x/30), pi/30))) + 0.1), RNA = 1, CAGE = 1, PAS = 1))
 - Alternative: abs(cos(x)) + abs(cos(x*b[i])),
- where b is an internal value sampled per gene in interval 3 to 15.}
+ where b is an internal value sampled per gene in interval 3 to 15.
+A numeric odd-length kernel can also be supplied, including the learned
+kernel returned by \code{learn_end_bias()$auto_correlation}.}
 
 \item{read_lengths_per}{a list, default: list(RFP = 27:29, RNA = 100, CAGE = 1, PAS = 1)}
 

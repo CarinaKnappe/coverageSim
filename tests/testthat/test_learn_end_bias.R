@@ -77,6 +77,12 @@ test_that("BAM learning recovers both end biases with codon effects and both str
   expect_equal(unique(fit$sequence_bias$dmn_alpha_scale), fit$dmn_alpha_scale)
   expect_equal(mean(fit$sequence_bias$alpha), 1)
   expect_equal(fit$diagnostics$dmn_alpha[usable == TRUE, .N], 4L)
+  expect_s3_class(fit$auto_correlation, "covsim_autocorrelation")
+  expect_equal(sum(fit$auto_correlation), 1)
+  expect_equal(fit$diagnostics$auto_correlation$lag, 1:9)
+  expect_setequal(fit$coverage_qc$summary$measure,
+    c("reads", "sites", "zero_fraction", "variance_to_mean",
+      "peak_fraction", "spike_fraction", "longest_zero_run"))
   # A biological codon effect must not simply be absorbed into the end profiles.
   codon_weights <- fit$diagnostics$codon_weights
   expect_gt(codon_weights[codon == "AAA", weight] / median(codon_weights$weight), 3.5)
@@ -133,6 +139,8 @@ test_that("ambiguous annotations are excluded and geometry must be explicit", {
                "dmn_min_reads")
   expect_error(fit_learning_fixture(fixture, bam, dmn_min_sites = 1),
                "dmn_min_sites")
+  expect_error(fit_learning_fixture(fixture, bam, acf_max_lag = 0),
+               "acf_max_lag")
   opportunities <- end_learning_opportunities(fixture$models, fixture$cds,
     fixture$geometry$distribution, 1L)
   reads <- read_end_learning_bam(bam, 20)$reads
@@ -143,6 +151,28 @@ test_that("ambiguous annotations are excluded and geometry must be explicit", {
   expect_equal(counted$diagnostics[["unmatched_or_ambiguous"]], sum(reads$count))
   expect_equal(learning_alignment_cigar(c("10=2X16M", "3S25M", "12M60N16M")),
                c("28M", NA_character_, "12M60N16M"))
+})
+
+test_that("local residual structure yields an autocorrelation kernel and roughness QC", {
+  sites <- data.table::rbindlist(lapply(paste0("tx", 1:20), function(id) {
+    data.table::data.table(
+      transcript_id = id,
+      site_tx = seq.int(1L, 180L, by = 3L),
+      observed = rep(c(rep(20, 5), rep(0, 5)), 6),
+      expected = rep(10, 60)
+    )
+  }))
+  learned <- learn_coverage_structure(sites, 4L)
+  expect_gt(learned$acf[lag == 1, correlation], 0.5)
+  expect_equal(names(learned$kernel), as.character(-4:4))
+  expect_equal(learned$qc$summary[measure == "zero_fraction", median], 0.5)
+  expect_equal(learned$qc$summary[measure == "longest_zero_run", median], 5)
+
+  set.seed(92)
+  shuffled <- sites[, observed := sample(observed), by = transcript_id]
+  random_acf <- learn_coverage_structure(shuffled, 4L)$acf
+  expect_gt(learned$acf[lag == 1, correlation],
+            random_acf[lag == 1, correlation] + 0.3)
 })
 
 test_that("BAM filters report excluded reads and retain explicit duplicates", {
