@@ -366,7 +366,8 @@ read_end_learning_bam <- function(bam, min_mapq) {
   open(file)
   on.exit(close(file))
   reads <- data.table::data.table(chromosome = character(), position = integer(),
-    strand = character(), cigar = character(), count = integer())
+    five_position = integer(), strand = character(), cigar = character(),
+    fragment_length = integer(), count = integer())
   diagnostics <- c(bam_records = 0, flag_or_mapq_or_NH_excluded = 0, unsupported_cigar = 0)
   repeat {
     raw <- Rsamtools::scanBam(file,
@@ -375,7 +376,9 @@ read_end_learning_bam <- function(bam, min_mapq) {
     chunk <- filter_end_learning_reads(raw, min_mapq)
     diagnostics <- diagnostics + chunk$diagnostics
     reads <- data.table::rbindlist(list(reads, chunk$reads))[
-      , .(count = sum(count)), by = .(chromosome, position, strand, cigar)]
+      , .(count = sum(count)), by = .(
+        chromosome, position, five_position, strand, cigar, fragment_length
+      )]
   }
   list(reads = reads, diagnostics = diagnostics)
 }
@@ -386,10 +389,28 @@ filter_end_learning_reads <- function(raw, min_mapq) {
   cigar <- learning_alignment_cigar(raw$cigar[keep])
   reads <- data.table::data.table(chromosome = as.character(raw$rname[keep]),
     position = raw$pos[keep], strand = as.character(raw$strand[keep]), cigar = cigar)
-  reads <- reads[!is.na(cigar), .(count = .N), by = .(chromosome, position, strand, cigar)]
+  reads <- reads[!is.na(cigar)]
+  if (nrow(reads)) {
+    reads[, fragment_length := learning_cigar_width(cigar, reference = FALSE)]
+    reads[, reference_width := learning_cigar_width(cigar, reference = TRUE)]
+    reads[, five_position := ifelse(
+      strand == "+", position, position + reference_width - 1L
+    )]
+  }
+  reads <- reads[, .(count = .N), by = .(
+    chromosome, position, five_position, strand, cigar, fragment_length
+  )]
   list(reads = reads, diagnostics = c(
     bam_records = length(keep), flag_or_mapq_or_NH_excluded = sum(!keep),
     unsupported_cigar = sum(is.na(cigar))))
+}
+
+learning_cigar_width <- function(cigar, reference = FALSE) {
+  as.integer(vapply(cigar, function(value) {
+    widths <- as.integer(strsplit(value, "[MN]")[[1]])
+    operations <- strsplit(gsub("[0-9]+", "", value), "")[[1]]
+    sum(widths[if (reference) operations %in% c("M", "N") else operations == "M"])
+  }, numeric(1)))
 }
 
 count_end_learning_reads <- function(opportunities, reads) {

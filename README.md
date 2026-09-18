@@ -139,3 +139,27 @@ biological effects or unmodelled mapping biases can still affect the estimate.
 The fit also returns a non-negative codon autocorrelation kernel and auditable
 zero, spike, peak and gap summaries. Pass the kernel as the RFP value in
 `auto_correlation`; use the QC tables to compare real and simulated libraries.
+
+Region allocation can be learned independently from the same or another BAM:
+
+```r
+regions <- list(leader = leader_ranges, cds = cds_ranges,
+                trailer = trailer_ranges, uorf = uorf_ranges)
+region_fit <- learn_region_proportions(
+  bam = "sample.bam",
+  transcripts = learning_transcripts,
+  regions = regions,
+  fragment_geometry = learned_geometry
+)
+
+region_counts <- simCountTablesRegions(
+  simulated_counts,
+  region_proportion = region_fit$region_proportion
+)
+```
+
+Reads compatible with several transcripts are excluded. A-sites falling in
+overlapping regions are assigned by the documented `uorf`, `cds`, `leader`,
+`trailer` priority by default; fractional allocation and exclusion are also
+available. The fit reports both global simulator-ready proportions and
+per-transcript estimates, with a configurable pseudocount for sparse regions.
