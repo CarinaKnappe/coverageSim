@@ -24,6 +24,7 @@ Imports:
   DESeq2,
   extraDistr,
   GenomeInfoDb,
+  GenomeInfoDbData,
   GenomicFeatures,
   GenomicRanges,
   ggplot2,
