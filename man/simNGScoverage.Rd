@@ -67,13 +67,13 @@ trailer = list(RFP = 1, RNA = 1, CAGE = quote(1/seq.int(x)), PAS = quote(1/seq.i
 uorf = list(RFP = c(5, 2, 1), RNA = 1, CAGE = quote(1/seq.int(x)), PAS = quote(1/seq.int(x, 1))))}
 
 \item{auto_correlation}{= list(leader = list(RFP = 1, RNA = 1, CAGE = 1, PAS = 1),
-cds = list(RFP = quote(abs(cos(seq(0, pi*(x/30), pi/30))) + 0.1), RNA = 1, CAGE = 1, PAS = 1),
-trailer = list(RFP = 1, RNA = 1, CAGE = 1, PAS = 1),
-uorf = list(RFP = quote(abs(cos(seq(0, pi*(x/30), pi/30))) + 0.1), RNA = 1, CAGE = 1, PAS = 1))
-- Alternative: abs(cos(x)) + abs(cos(x*b[i])),
- where b is an internal value sampled per gene in interval 3 to 15.
+   cds = list(RFP = quote(abs(cos(seq(0, pi*(x/30), pi/30))) + 0.1), RNA = 1, CAGE = 1, PAS = 1),
+   trailer = list(RFP = 1, RNA = 1, CAGE = 1, PAS = 1),
+   uorf = list(RFP = quote(abs(cos(seq(0, pi*(x/30), pi/30))) + 0.1), RNA = 1, CAGE = 1, PAS = 1))
+   - Alternative: abs(cos(x)) + abs(cos(x*b[i])),
+    where b is an internal value sampled per gene in interval 3 to 15.
 A numeric odd-length kernel can also be supplied, including the learned
-kernel returned by \code{learn_end_bias()$auto_correlation}.}
+kernel returned by code{learn_end_bias()$auto_correlation}.}
 
 \item{read_lengths_per}{a list, default: list(RFP = 27:29, RNA = 100, CAGE = 1, PAS = 1)}
 
@@ -147,9 +147,6 @@ strength convention; their tables contain codon/frame, fragment_length and
 weight columns. They act during physical-fragment selection and can be
 learned with `learn_end_bias(by_length = TRUE)`.}
 
-\item{ground_truth}{FALSE, TRUE, or a directory path. In simulated-RPF mode, TRUE
-writes one compressed fragment truth table next to each simulated library.}
-
 \item{technical_artifacts}{Optional list controlling alignment artifacts in
 simulated RPF SAM/BAM output: duplication_rate and multimapping_rate default
 to zero; duplicate_copies and secondary_alignments default to one. Active
@@ -157,6 +154,9 @@ artifacts require RFP output format sam or bam. Extra PCR copies carry flag
 0x400; alternate alignments share the primary QNAME and carry flag 0x100 and
 an NH tag greater than one. Biological fragment counts remain in the regular
 ground truth; the expanded artifact truth is written separately.}
+
+\item{ground_truth}{FALSE, TRUE, or a directory path. In simulated-RPF mode, TRUE
+writes one compressed fragment truth table next to each simulated library.}
 
 \item{debug_coverage}{logical, default FALSE. If TRUE, debug steps of coverage calculation,
 for parameter errors or just to understand how it all works.}

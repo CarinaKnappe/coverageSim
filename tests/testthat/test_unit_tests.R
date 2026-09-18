@@ -1,10 +1,3 @@
-test_that("load_seq_bias returns the default AA p-site bias table", {
-  dt <- load_seq_bias()
-  expect_s3_class(dt, "data.table")
-  expect_equal(unique(dt$variable), "median")
-  expect_true(all(c("seqs", "alpha") %in% colnames(dt)))
-})
-
 test_that("DMN alpha scaling changes variance but preserves expected coverage", {
   alpha <- replicate(4000L, c(2, 6), simplify = FALSE)
   low <- do.call(rbind, scale_dmn_alpha(alpha, 0.25))
@@ -69,26 +62,12 @@ test_that("numeric autocorrelation kernels smooth locally and validate input", {
   expect_error(apply_autocorrelation_kernel(signal, c(1, -1, 1)), "non-negative")
 })
 
-test_that("load_seq_bias supports alternate built-in bias tables", {
-  aa_stop <- load_seq_bias(bias = "stop_codon")
-  codon_start <- load_seq_bias(
-    type = "codon", shift = "a-site", bias = "start_codon"
-  )
-  codon_similar <- load_seq_bias(
-    type = "codon", shift = "a-site", bias = "similar"
-  )
-  codon_all <- load_seq_bias(type = "codon", shift = "a-site", bias = "all")
-
-  expect_equal(unique(aa_stop$variable), "R1")
-  expect_equal(unique(codon_start$variable), "R2")
-  expect_equal(unique(codon_similar$variable), "R10")
-  expect_true(length(unique(codon_all$variable)) > 1)
-})
-
-test_that("load_seq_bias rejects unsupported arguments", {
+test_that("load_seq_bias rejects unsupported type/shift arguments", {
+  # bias-value validation ("unknown"/"R999") is covered more thoroughly in
+  # test_sequence_profile_selection.R; only the type/shift stopifnot()
+  # checks are unique to this test.
   expect_error(load_seq_bias(type = "peptide"))
   expect_error(load_seq_bias(shift = "e-site"))
-  expect_error(load_seq_bias(bias = "unknown"))
 })
 
 test_that("pack_alpha_rows and flatten_sample_rows preserve row-wise ragged layout", {

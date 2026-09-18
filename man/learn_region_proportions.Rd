@@ -38,7 +38,7 @@ global and per-transcript proportions. Default 0.5.}
 }
 \value{
 A covsim_region_fit list with simulator-ready region_proportion,
-global and per-transcript estimates, diagnostics and provenance.
+  global and per-transcript estimates, diagnostics and provenance.
 }
 \description{
 Assigns each supported single-end fragment to one transcript and then to a

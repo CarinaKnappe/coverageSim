@@ -18,21 +18,29 @@ learn_fragment_geometry(
 }
 \arguments{
 \item{bam}{Path to a genomic BAM containing complete single-end fragments.}
+
 \item{transcripts}{Named GRangesList of transcript exons in transcript order.}
+
 \item{cds}{Named GRangesList of complete CDS exons using the same identifiers.}
+
 \item{site_reference}{Either a_site (default) or p_site.}
+
 \item{min_length, max_length}{Inclusive fragment-length limits.}
+
 \item{min_reads_per_length}{Minimum BAM records required for a length.}
-\item{offset_search}{Number of nucleotides searched on each side of the default offset.}
+
+\item{offset_search}{Number of nucleotides searched on each side of the
+default offset.}
+
 \item{min_mapq}{Minimum mapping quality. Default 20.}
 }
 \value{
-A simulator-ready fragment_geometry list. The diagnostics attribute contains
-every tested length/offset combination.
+A simulator-ready fragment_geometry list. The diagnostics attribute
+  contains every tested length/offset combination.
 }
 \description{
 For each sufficiently supported fragment length, candidate offsets around a
 biologically plausible default are scored by the fraction of uniquely
-projected CDS sites in frame zero. The selected length frequencies and offsets
-form a simulator-ready fragment geometry.
+projected CDS sites in frame zero. The selected length frequencies and
+offsets form a simulator-ready fragment geometry.
 }

@@ -31,12 +31,16 @@ Imports:
   IRanges,
   htmlwidgets,
   knitr,
+  methods,
   RiboCrypt,
   Rsamtools,
   rtracklayer,
   rlang,
-  stringr
+  stats,
+  stringr,
+  txdbmaker,
+  utils
 Suggests:
   testthat
 Config/testthat/edition: 3
-RoxygenNote: 7.2.1
+Config/roxygen2/version: 8.0.0

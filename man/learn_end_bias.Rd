@@ -62,8 +62,7 @@ autocorrelation. Default 9.}
 \value{
 A list containing five_prime_bias, three_prime_bias, codon_bias and
   frame_bias, ready to place in fragment_geometry, plus sequence_bias and
-  dmn_alpha_scale for Step 4,
-  diagnostics and provenance. Passing sequence_bias to simNGScoverage() lets
+  dmn_alpha_scale for Step 4, diagnostics and provenance. Passing sequence_bias to simNGScoverage() lets
   it use the learned dmn_alpha_scale automatically. Save with saveRDS().
   Each profile has source='learned' and strength=1. Unobserved motifs shrink
   towards neutral; confidence intervals are not provided. Only complete
