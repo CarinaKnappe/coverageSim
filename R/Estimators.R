@@ -206,31 +206,16 @@ AA_score <- function(grl, reads, seqs, weight = "score", is.sorted = TRUE,
   return(seq_usage(dt[, .(score = count)], seqs, dt[, genes], dispersion_method))
 }
 
-#' Find proportion used of uORFs vs gene regions
-#' @param gene character name of gene
-#' @param uORFs GRangesList of uORF genomic coordinates
-#' @param merged_gr the coverage track as GRanges
-#' @export
-#' @return a list of length 2: data.table of gene tiling coverage and sum coverage.
-overlap_props <- function(gene, uORFs, merged_gr) {
-  mrna <- loadRegion(df, "mrna", names.keep = gene)
-  count_mRNA <- countOverlapsW(mrna, merged_gr, "score")
-  count_leader <- countOverlapsW(loadRegion(df, "leaders", names.keep = gene), merged_gr, "score")
-  count_cds <- countOverlapsW(loadRegion(df, "cds", names.keep = gene), merged_gr, "score")
-  count_uORFs <- countOverlapsW(uORFs, merged_gr, "score")
-  dt_gene <- data.table(counts = c(count_mRNA, count_leader, count_cds, count_uORFs),
-                        region = c("MRNA", "LEADERS", "CDS", paste0("UORF", seq(length(uORFs)))))
-  count_table <- matrix(count_mRNA)
-
-  colData <- DataFrame(libtype = as.factor("RFP"),
-                       condition = as.factor("WT"),
-                       replicate = as.factor(1))
-  colData$SAMPLE <- paste(colData$libtype, colData$condition, colData$replicate, sep = "_")
-  colnames(count_table) <- colData$SAMPLE
-  rownames(colData) <- colnames(count_table)
-  count_table <- SummarizedExperiment(assays = count_table, rowRanges = mrna, colData = colData)
-  return(list(dt_gene, count_table))
-}
+# NOTE: overlap_props() was removed here (2026-09-18). It referenced an
+# undefined global `df` (an ORFik experiment object was clearly intended,
+# but never passed as a parameter), so it errored on every call unless a
+# `df` happened to exist by coincidence in the calling environment. It was
+# unused anywhere else in this package, in the test suite, or in the
+# rust_helpers/choros scripts, and was pre-existing article/figure code
+# (not part of the simulation pipeline) rather than a Carina change. See
+# claude/code-review-carina-dev-2026-09.md in the CoverageSimulator Claude
+# project for details. Run `devtools::document()` to regenerate NAMESPACE
+# and remove man/overlap_props.Rd accordingly.
 
 coverage_all_cds_all_samples <- function(df, cds, prefix, lib.type = "pshifted") {
   if (!is.character(prefix)) stop("Prefix must be character vector!")
