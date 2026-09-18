@@ -22,6 +22,7 @@ simNGScoverage(
   read_lengths_per = list(RFP = 27:29, RNA = 100, CAGE = 1, PAS = 1),
   sampling = list(leader = list(RFP = "MN", RNA = "MN"), cds = list(RFP = "DMN"), trailer
     = list(RFP = "MN"), uorf = list(RFP = "DMN")),
+  dmn_alpha_scale = NULL,
   libClasses = list(RFP = "GRanges", RNA = "GAlignment", CAGE = "GRanges", PAS =
     "GRanges"),
   libFormats = list(RFP = "ofst", RNA = "ofst", CAGE = "ofst", PAS = "ofst"),
@@ -77,6 +78,15 @@ cds =    list(RFP = "DMN"),
 trailer =list(RFP = "MN"),
 uorf =   list(RFP = "DMN"))}
 
+\item{dmn_alpha_scale}{NULL or a positive numeric scalar. NULL (default) uses
+a unique dmn_alpha_scale stored in seq_bias, as produced by learn_end_bias(),
+and otherwise falls back to 1. The value multiplies the final Step-4
+Dirichlet alpha vector immediately before sampling. Values below 1 increase
+position-to-position variation, producing more isolated peaks and zeros;
+values above 1 make coverage smoother. Relative expected coverage and the
+total read count per transcript region remain unchanged. This parameter
+affects only regions using \code{sampling = "DMN"}.}
+
 \item{libClasses}{= list(RFP = "GRanges", RNA = "GAlignment", CAGE = "GRanges", PAS = "GRanges")}
 
 \item{libFormats}{The output formats, a named list of characters:
@@ -84,8 +94,8 @@ list(RFP = "ofst", RNA = "ofst", CAGE = "ofst", PAS = "ofst"). Alternatives:
 "sam" and "bam".}
 
 \item{seq_bias}{the sequence bias used for simulation, default:
-load_seq_bias(), the Ribosome profiling estimates from Amino acid dwell times from
-P-site shifted reads from library "R2" from the coverageSim paper. Specifically it is:
+load_seq_bias(), the motif-wise median of the amino-acid alpha estimates from
+P-site shifted reads in libraries R1--R10 from the coverageSim paper. Specifically it is:
 a data.table with correctly named columns:
  "seq", "alpha"\cr
  the column seq (Amino acid, 1 letter per)
@@ -93,9 +103,9 @@ a data.table with correctly named columns:
  In addition iMethionin
  (start codon) can be differentiated by setting seq = "#" and stop codon
  as seq = "*". Gives ability to scale these two important regions seperatly
-from other codons.
-If a \code{variable} column is present, it must identify exactly one profile.
-Tables returned by \code{load_seq_bias(bias = "all")} must be subset first.}
+ from other codons.
+ If a \code{variable} column is present, it must identify exactly one profile.
+ Tables returned by \code{load_seq_bias(bias = "all")} must be subset first.}
 
 \item{true_uorf_ranges}{= "AUTO". Load from uorf string in 'simGenome'.}
 
@@ -120,10 +130,14 @@ The former name `"physical"` remains as a deprecated compatibility alias.}
 (`"p_site"` or `"a_site"`), a joint `distribution` with fragment_length,
 site_offset, and probability columns, and `boundary_action`. The default
 `"renormalize"` conditions probabilities on valid boundary geometry and
-preserves counts; `"error"` rejects impossible geometry. End-bias source
-fields accept `"none"`, `"user"`, or `"learned"`; user/learned tables contain
-`kmer`, `weight`, and optionally `fragment_length`. Use
-\code{make_synthetic_end_bias()} for a simple explicit profile.}
+preserves counts; `"error"` rejects impossible geometry.
+End-bias sources may also be `"user"` or `"learned"` with a table of
+`kmer`, `weight`, and optionally `fragment_length`; use
+\code{make_synthetic_end_bias()} to create a simple explicit profile.
+Each end accepts `strength` (default 1): 0 disables it, 0.5 weakens it,
+and values above 1 strengthen it using weight^strength. Active end biases
+jointly weight sites and fragment geometry before the final read draw,
+preserving each transcript/region read budget and the input site support.}
 
 \item{ground_truth}{FALSE, TRUE, or a directory path. In simulated-RPF mode, TRUE
 writes one compressed fragment truth table next to each simulated library.}

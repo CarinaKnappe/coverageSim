@@ -44,7 +44,7 @@ normalize_fragment_geometry <- function(fragment_geometry) {
 }
 
 validate_end_bias_table <- function(table, bias_name = "end bias") {
-  table <- data.table::as.data.table(table)
+  table <- data.table::copy(data.table::as.data.table(table))
   if (!all(c("kmer", "weight") %in% names(table))) {
     stop(bias_name, " table requires columns: kmer, weight")
   }
@@ -54,8 +54,9 @@ validate_end_bias_table <- function(table, bias_name = "end bias") {
   }
   table[, kmer := toupper(as.character(kmer))]
   if ("fragment_length" %in% names(table)) {
-    if (anyNA(table$fragment_length) || any(table$fragment_length <= 0 |
-                                             table$fragment_length != as.integer(table$fragment_length))) {
+    if (any(!is.na(table$fragment_length) &
+            (!is.finite(table$fragment_length) | table$fragment_length <= 0 |
+             table$fragment_length != as.integer(table$fragment_length)))) {
       stop(bias_name, " fragment_length must contain positive integers")
     }
     table[, fragment_length := as.integer(fragment_length)]
@@ -72,24 +73,30 @@ normalize_end_bias <- function(bias, bias_name) {
     stop("fragment_geometry$", bias_name,
          " must specify source none, default, user, or learned")
   }
+  strength <- if (is.null(bias$strength)) 1 else bias$strength
+  if (!is.numeric(strength) || length(strength) != 1L ||
+      !is.finite(strength) || strength < 0) {
+    stop(bias_name, " strength must be one finite non-negative number")
+  }
   if (bias$source %in% c("none", "default")) {
-    return(list(source = bias$source, table = NULL))
+    return(list(source = bias$source, table = NULL, strength = strength))
   }
   if (is.null(bias$table)) {
     stop("fragment_geometry$", bias_name, " requires a kmer/weight table")
   }
-  list(source = bias$source, table = validate_end_bias_table(bias$table, bias_name))
+  list(source = bias$source, table = validate_end_bias_table(bias$table, bias_name),
+       strength = strength)
 }
 
 end_bias_weight <- function(sequence, fragment_length,
                             five_bias, three_bias) {
   lookup <- function(kmer, length_value, bias) {
-    if (is.null(bias$table)) return(1)
+    if (is.null(bias$table) || identical(bias$strength, 0)) return(1)
     value <- toupper(kmer)
     exact <- bias$table[kmer == value & fragment_length == length_value, weight]
-    if (length(exact)) return(exact[[1L]])
+    if (length(exact)) return(exact[[1L]] ^ bias$strength)
     hit <- bias$table[kmer == value & is.na(fragment_length), weight]
-    if (!length(hit)) 1 else hit[[1L]]
+    if (!length(hit)) 1 else hit[[1L]] ^ bias$strength
   }
   extract_kmer <- function(bias, from_end = FALSE) {
     if (is.null(bias$table)) return(NULL)
@@ -331,15 +338,53 @@ transcript_fragment_alignment <- function(model, transcript_start,
   )
 }
 
+has_active_end_bias <- function(geometry) {
+  any(vapply(geometry[c("five_prime_bias", "three_prime_bias")], function(bias) {
+    !is.null(bias$table) && bias$strength > 0
+  }, logical(1)))
+}
+
+# Preserve region budgets when present; direct callers supply counts per transcript.
+allocate_fragment_candidates <- function(candidate_rows, signal_table, joint) {
+  candidates <- data.table::rbindlist(candidate_rows, idcol = "signal_row")
+  if (joint) {
+    groups <- if ("sampling_group" %in% names(signal_table)) {
+      signal_table$sampling_group
+    } else signal_table$transcript_id
+  } else groups <- seq_len(nrow(signal_table))
+  candidates[, sampling_group := groups[signal_row]]
+  candidates[, probability := geometry_probability * bias_weight *
+               signal_table$score[signal_row]]
+  if (any(!is.finite(candidates$probability))) {
+    stop("End-bias strength produces non-finite weights; reduce strength")
+  }
+  candidates[, c("probability", "score") := {
+    rows <- unique(signal_row)
+    total <- if ("read_count" %in% names(signal_table)) {
+      unique(signal_table$read_count[rows])
+    } else round(sum(signal_table$score[rows]))
+    if (length(total) != 1L || total < 0 || total != floor(total)) {
+      stop("Invalid fragment sampling budget")
+    }
+    if (sum(probability) <= 0) stop("End-bias weights exclude every feasible fragment")
+    probability <- probability / max(probability)
+    p <- probability / sum(probability)
+    list(p, as.integer(stats::rmultinom(1L, total, p)))
+  }, by = sampling_group]
+  candidates
+}
+
 make_simulated_rpf_fragments <- function(signal_table, transcript_models,
                                          fragment_lengths, fragment_geometry) {
   geometry <- normalize_fragment_geometry(fragment_geometry)
   candidates <- resolve_fragment_distribution(fragment_lengths, geometry)
-  if (any(signal_table$score < 0 | signal_table$score != as.integer(signal_table$score))) {
+  if (any(!is.finite(signal_table$score) | signal_table$score < 0) ||
+      (!"read_count" %in% names(signal_table) &&
+       any(signal_table$score != as.integer(signal_table$score)))) {
     stop("Simulated RPF scores must be non-negative integers")
   }
 
-  rows <- lapply(seq_len(nrow(signal_table)), function(i) {
+  candidate_rows <- lapply(seq_len(nrow(signal_table)), function(i) {
     row <- signal_table[i]
     model <- transcript_models[[row$transcript_id]]
     if (is.null(model)) stop("No transcript model for: ", row$transcript_id)
@@ -385,17 +430,15 @@ make_simulated_rpf_fragments <- function(signal_table, transcript_models,
     }, numeric(1))]
     valid[, probability := probability / sum(probability)]
     valid[, geometry_probability := probability]
-    valid[, probability := probability * bias_weight]
-    if (sum(valid$probability) <= 0) {
-      stop("End-bias weights exclude every feasible fragment", call. = FALSE)
-    }
-    valid[, probability := probability / sum(probability)]
-    allocation <- as.integer(stats::rmultinom(
-      1L, size = as.integer(row$score), prob = valid$probability
-    ))
-    selected <- valid[allocation > 0L]
-    selected[, score := allocation[allocation > 0L]]
-
+    valid
+  })
+  allocated <- allocate_fragment_candidates(
+    candidate_rows, signal_table, has_active_end_bias(geometry)
+  )
+  rows <- lapply(seq_len(nrow(signal_table)), function(i) {
+    row <- signal_table[i]
+    model <- transcript_models[[row$transcript_id]]
+    selected <- allocated[signal_row == i & score > 0L]
     data.table::rbindlist(lapply(seq_len(nrow(selected)), function(j) {
       fragment_length <- selected$fragment_length[j]
       site_offset <- selected$site_offset[j]
@@ -413,6 +456,7 @@ make_simulated_rpf_fragments <- function(signal_table, transcript_models,
         strand = model$strand,
         cigar = alignment$cigar,
         score = selected$score[j],
+        sampling_group = selected$sampling_group[j],
         transcript_id = row$transcript_id,
         ribosome_site = row$signal_position,
         signal_position = row$signal_position,
@@ -496,7 +540,8 @@ write_fragment_ground_truth <- function(fragment_table, file_base,
     "fragment_id", "transcript_id", "ribosome_site", "signal_position",
     "fragment_start", "fragment_end", "five_prime_end", "three_prime_end",
     "fragment_length", "site_offset", "site_reference", "geometry_probability",
-    "strand", "cigar", "sequence", "score"
+    "strand", "cigar", "sequence", "score", "sampling_group",
+    "five_prime_kmer", "three_prime_kmer", "end_bias_weight", "final_probability"
   )
   data.table::fwrite(fragment_table[, ..columns], path, sep = "\t")
   path

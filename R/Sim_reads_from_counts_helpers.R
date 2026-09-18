@@ -152,6 +152,42 @@ flatten_sample_rows <- function(sample_matrix, row_lengths) {
   sample_matrix[matrix_row_indices(row_lengths)]
 }
 
+validate_dmn_alpha_scale <- function(scale) {
+  if (!is.numeric(scale) || length(scale) != 1L || is.na(scale) ||
+      !is.finite(scale) || scale <= 0) {
+    stop("dmn_alpha_scale must be one finite number greater than zero", call. = FALSE)
+  }
+  invisible(scale)
+}
+
+resolve_dmn_alpha_scale <- function(scale, seq_bias) {
+  if (!is.null(scale)) {
+    validate_dmn_alpha_scale(scale)
+    return(scale)
+  }
+  learned <- if (!is.null(seq_bias) && "dmn_alpha_scale" %in% names(seq_bias)) {
+    unique(seq_bias$dmn_alpha_scale[!is.na(seq_bias$dmn_alpha_scale)])
+  } else numeric()
+  if (length(learned) > 1L) {
+    stop("seq_bias contains multiple dmn_alpha_scale values", call. = FALSE)
+  }
+  if (!length(learned)) return(1)
+  validate_dmn_alpha_scale(learned)
+  learned
+}
+
+scale_dmn_alpha <- function(alpha_rows, scale) {
+  validate_dmn_alpha_scale(scale)
+  scaled <- lapply(alpha_rows, function(alpha) alpha * scale)
+  valid <- vapply(scaled, function(alpha) {
+    length(alpha) > 0L && all(is.finite(alpha)) && all(alpha > 0)
+  }, logical(1))
+  if (!all(valid)) {
+    stop("dmn_alpha_scale produced invalid Dirichlet alpha values", call. = FALSE)
+  }
+  scaled
+}
+
 is_list_or_null <- function(...) {
   args <- list(...)
   mc <- match.call(expand.dots = FALSE)
@@ -366,7 +402,7 @@ validate_sequence_profile <- function(seq_bias) {
   if (length(profiles) != 1L || anyNA(profiles) || !nzchar(profiles)) {
     stop(
       "seq_bias must contain exactly one named sequence profile. ",
-      "Select one with load_seq_bias(bias = 'R2') or subset your table; ",
+      "Select one with load_seq_bias(bias = 'median') or subset your table; ",
       "bias = 'all' is for inspection, not simulation.",
       call. = FALSE
     )
@@ -492,10 +528,12 @@ sim_sequence_bias <- function(ideal_coverage, lengths, alpha_matrix,
 #' @param shift character, default "p-site". Alternative: "a-site"
 #' @param dir Directory with sequence biases, default is internal path
 #' predefined estimators: system.file(package = "coverageSim", "extdata")
-#' @param bias One profile name (e.g. "R2"), or one of the aliases
-#' "start_codon" (default, R2), "stop_codon" (R1), and "similar" (R10).
-#' "all" loads every profile for inspection; select one before passing the
-#' table to \code{simNGScoverage()}.
+#' @param bias The default, \code{"median"}, calculates the motif-wise median
+#' of the alpha values in libraries R1--R10. Alternatively, use one profile
+#' name (e.g. "R2"), one of the aliases "start_codon" (R2), "stop_codon"
+#' (R1), and "similar" (R10), or \code{"all"} to load every profile for
+#' inspection. Select one profile before passing a table loaded with
+#' \code{bias = "all"} to \code{simNGScoverage()}.
 #' @return a data.table of bias per sequence motif
 #' @export
 #' @examples
@@ -504,7 +542,7 @@ sim_sequence_bias <- function(ideal_coverage, lengths, alpha_matrix,
 #' load_seq_bias(bias = "all")
 load_seq_bias <- function(type = "AA", shift = "p-site",
                           dir = system.file(package = "coverageSim", "extdata"),
-                          bias = "start_codon") {
+                          bias = "median") {
   stopifnot(type %in% c("AA", "codon"))
   stopifnot(shift %in% c("p-site", "a-site"))
   if (!is.character(bias) || length(bias) != 1L || is.na(bias) || !nzchar(bias)) {
@@ -514,16 +552,43 @@ load_seq_bias <- function(type = "AA", shift = "p-site",
   file <- paste0(type, "_bias_", shift, "_estimates_human.csv")
   dt <- fread(file.path(dir, file))
   if (bias == "all") return(dt)
+  if (bias == "median") return(median_sequence_profile(dt))
   aliases <- c(start_codon = "R2", stop_codon = "R1", similar = "R10")
   profile <- if (bias %in% names(aliases)) unname(aliases[[bias]]) else bias
   if (!profile %in% dt$variable) {
     stop(
       "Unknown bias profile: ", bias, ". Choose one of: ",
-      paste(c(names(aliases), unique(dt$variable), "all"), collapse = ", "),
+      paste(c("median", names(aliases), unique(dt$variable), "all"), collapse = ", "),
       call. = FALSE
     )
   }
   dt[variable == profile, ]
+}
+
+median_sequence_profile <- function(profiles) {
+  required_profiles <- paste0("R", seq_len(10L))
+  selected <- profiles[variable %in% required_profiles]
+  if (!setequal(unique(selected$variable), required_profiles)) {
+    stop("Median sequence bias requires profiles R1 through R10", call. = FALSE)
+  }
+  if (anyNA(selected$seqs) || anyNA(selected$alpha) ||
+      any(!is.finite(selected$alpha)) || any(selected$alpha <= 0)) {
+    stop("Sequence-bias alpha values must be finite and positive", call. = FALSE)
+  }
+  support <- selected[, .N, by = .(variable, seqs)]
+  if (any(support$N != 1L)) {
+    stop("Each sequence motif must occur once in every profile", call. = FALSE)
+  }
+  motif_support <- support[, .N, by = seqs]
+  if (any(motif_support$N != length(required_profiles))) {
+    stop("Profiles R1 through R10 must contain the same sequence motifs", call. = FALSE)
+  }
+  motif_order <- unique(selected$seqs)
+  result <- selected[, .(alpha = stats::median(alpha)), by = seqs]
+  result <- result[match(motif_order, seqs)]
+  result[, variable := "median"]
+  data.table::setcolorder(result, c("variable", "seqs", "alpha"))
+  result[]
 }
 
 append_rnase_to_dt <- function(dt_range, lengths, rnase_bias) {

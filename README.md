@@ -67,3 +67,72 @@ Now load bigwig files by:
 - load all paths from bigwig_paths above
 
 You now have genome, gtf and tracks loaded in IGV
+
+## Learn end biases independently of the simulation inputs
+
+`learn_end_bias()` estimates 5-prime and 3-prime sequence preferences from a
+complete-fragment genomic Ribo-seq BAM. Supply its matching reference and
+annotation, and an explicit length-specific offset table. These learning inputs
+can differ from the genome, count table and region proportions used for simulation.
+
+```r
+devtools::load_all(".")
+
+# Select matching, unambiguous transcript/CDS annotations for the real sample.
+transcripts <- ORFik::loadRegion(real_txdb, "mrna")
+cds <- ORFik::loadRegion(real_txdb, "cds", names.keep = names(transcripts))
+
+# Replace these example offsets with offsets appropriate for the input library.
+geometry <- list(
+  source = "user", site_reference = "a_site",
+  distribution = data.frame(
+    fragment_length = c(28L, 29L),
+    site_offset = c(15L, 16L), probability = c(0.5, 0.5)
+  )
+)
+learned <- learn_end_bias(
+  bam = "real_sample.bam", fasta = "matching_reference.fa",
+  transcripts = transcripts, cds = cds,
+  fragment_geometry = geometry, k = 1, by_length = FALSE
+)
+saveRDS(learned, "learned_end_bias.rds")
+
+# No original BAM is needed for later simulations. Choose the simulation's
+# own geometry, genome and region counts independently.
+simulation_geometry <- list(source = "default", site_reference = "a_site")
+simulation_geometry$five_prime_bias <- learned$five_prime_bias
+simulation_geometry$three_prime_bias <- learned$three_prime_bias
+simulation_geometry$five_prime_bias$strength <- 0.5
+simulation_geometry$three_prime_bias$strength <- 1
+simNGScoverage(
+  simGenome = simulated_genome,
+  count_table = simulated_region_counts,
+  seq_bias = learned$sequence_bias,
+  fragment_geometry = simulation_geometry
+)
+```
+
+The fit compares observed reads with possible CDS fragments, including positions
+with zero reads. It jointly estimates both end effects and nuisance codon effects,
+conditioning on transcript-by-length totals. A positive ridge penalty stabilizes
+sparse motifs. `k = 2` or `k = 3` allows longer motifs; `by_length = TRUE` estimates
+separate profiles per supported length. Missing length/motif combinations in a
+profile retain the simulator's neutral fallback. The fitted codon effects are
+returned as `learned$sequence_bias`. This table also stores the robustly estimated
+Dirichlet-multinomial concentration. When it is passed as `seq_bias`, the default
+`dmn_alpha_scale = NULL` uses that learned concentration automatically. An
+explicit numeric `dmn_alpha_scale` always overrides it; profiles without a
+learned value fall back to `1`.
+
+Inspect `learned$diagnostics` for used/excluded read counts, motif support and fit
+convergence. The BAM is read in chunks, retaining counts per distinct alignment.
+This first learner requires one supplied offset per length and complete CDS
+annotations. It excludes clips, indels, paired reads, low-quality/secondary/
+supplementary mappings, NH>1, ambiguous transcript assignments, and reads whose
+assigned site is not at a CDS codon boundary. Duplicate flags alone are retained.
+It estimates transferable sequence preferences under these assumptions, rather
+than identifying an enzyme-specific effect or providing confidence intervals.
+Length probabilities, frame noise and region proportions are not learned by this
+function. Coverage roughness is estimated from transcript-level overdispersion
+after accounting for fitted codon and end preferences. Strong position-specific
+biological effects or unmodelled mapping biases can still affect the estimate.

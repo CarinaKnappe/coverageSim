@@ -17,6 +17,35 @@ test_that("named built-in profiles retain their original weights", {
   }
 })
 
+test_that("default sequence profile is the motif-wise median of R1 through R10", {
+  required_profiles <- paste0("R", 1:10)
+  for (type in c("AA", "codon")) {
+    for (shift in c("p-site", "a-site")) {
+      all_profiles <- load_seq_bias(type = type, shift = shift, bias = "all")
+      source <- all_profiles[variable %in% required_profiles]
+      expected <- source[, .(
+        expected_alpha = mean(sort(alpha)[5:6]),
+        source_values = .N,
+        minimum = min(alpha),
+        maximum = max(alpha)
+      ), by = seqs]
+      observed <- load_seq_bias(type = type, shift = shift)
+      explicit <- load_seq_bias(type = type, shift = shift, bias = "median")
+      comparison <- merge(observed, expected, by = "seqs", sort = FALSE)
+
+      expect_equal(observed, explicit)
+      expect_equal(unique(observed$variable), "median")
+      expect_equal(nrow(observed), data.table::uniqueN(all_profiles$seqs))
+      expect_equal(nrow(comparison), nrow(observed))
+      expect_true(all(comparison$source_values == 10L))
+      expect_equal(comparison$alpha, comparison$expected_alpha, tolerance = 1e-15)
+      expect_true(all(comparison$alpha >= comparison$minimum))
+      expect_true(all(comparison$alpha <= comparison$maximum))
+      expect_true(all(is.finite(comparison$alpha) & comparison$alpha > 0))
+    }
+  }
+})
+
 test_that("ambiguous profiles fail before simulation reads or writes files", {
   profiles <- load_seq_bias(type = "codon", shift = "a-site", bias = "all")
   expect_error(simNGScoverage(seq_bias = profiles), "exactly one named sequence profile")

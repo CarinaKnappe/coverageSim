@@ -1,0 +1,381 @@
+#' Learn transferable read-end preferences from aligned Ribo-seq fragments
+#'
+#' Fits a regularized conditional multinomial model to observed and possible
+#' fragments. Transcript-by-length totals are conditioned out; codon effects
+#' are fitted jointly as nuisance parameters. These are estimated sequence
+#' preferences, not an assumption-free separation of protocol and biology.
+#'
+#' @param bam Path to a single-end genomic BAM containing complete fragments.
+#' @param fasta Reference FASTA used for alignment.
+#' @param transcripts Named GRangesList of transcript exons in transcript order.
+#' @param cds Named GRangesList of CDS exons, with the same transcript identifiers.
+#' @param fragment_geometry Geometry list with an explicit distribution containing
+#'   one site_offset per fragment_length. Offsets are zero-based distances from
+#'   the biological 5-prime end to the first nucleotide of the reference codon.
+#' @param k End motif length, from 1 to 3. Default 1 is the most conservative fit.
+#' @param by_length Fit separate end preferences per length (default FALSE).
+#' @param min_mapq Minimum mapping quality (default 20). NH greater than 1,
+#'   secondary, supplementary, failed-QC, paired and unmapped reads are excluded.
+#'   Duplicate-flagged reads are retained; missing NH is allowed.
+#' @param ridge Positive penalty shrinking log preferences towards zero.
+#'   The per-length fragment totals are conditioned on, not learned as unbiased
+#'   length probabilities. Geometry probabilities only select supported lengths.
+#' @param maxit Maximum optimizer iterations.
+#' @param dmn_min_reads Minimum usable reads per transcript for estimating the
+#'   Dirichlet-multinomial concentration. Default 50.
+#' @param dmn_min_sites Minimum CDS codon opportunities per transcript for
+#'   estimating the concentration. Default 20.
+#' @return A list containing five_prime_bias and three_prime_bias, ready to place
+#'   in fragment_geometry, plus sequence_bias and dmn_alpha_scale for Step 4,
+#'   diagnostics and provenance. Passing sequence_bias to simNGScoverage() lets
+#'   it use the learned dmn_alpha_scale automatically. Save with saveRDS().
+#'   Each profile has source='learned' and strength=1. Unobserved motifs shrink
+#'   towards neutral; confidence intervals are not provided. Only complete
+#'   M/=/X/N alignments unambiguously compatible with one supplied transcript,
+#'   with the reference site on a CDS codon boundary, are used. Soft clips,
+#'   indels, ambiguous reference bases and boundary-adjusted offsets are excluded.
+#' @export
+learn_end_bias <- function(bam, fasta, transcripts, cds, fragment_geometry,
+                           k = 1L, by_length = FALSE, min_mapq = 20,
+                           ridge = 1, maxit = 500L,
+                           dmn_min_reads = 50L, dmn_min_sites = 20L) {
+  validate_end_learning_input(bam, fasta, transcripts, cds, k, by_length,
+                              min_mapq, ridge, maxit,
+                              dmn_min_reads, dmn_min_sites)
+  geometry <- normalize_fragment_geometry(fragment_geometry)
+  if (is.null(geometry$distribution)) {
+    stop("Learning requires an explicit length/offset distribution")
+  }
+  distribution <- validate_fragment_distribution(geometry$distribution)
+  distribution <- distribution[probability > 0]
+  if (anyDuplicated(distribution$fragment_length)) {
+    stop("Learning currently requires one offset per fragment length")
+  }
+  if (any(distribution$fragment_length < k)) stop("Motifs must fit inside fragments")
+  models <- transcript_models(transcripts, fasta)
+  opportunities <- end_learning_opportunities(models, cds, distribution, k)
+  if (!nrow(opportunities)) stop("No valid CDS fragment opportunities")
+  observed <- read_end_learning_bam(bam, min_mapq)
+  counted <- count_end_learning_reads(opportunities, observed$reads)
+  if (!sum(counted$data$count)) stop("No usable reads match the supplied CDS geometry")
+  fit <- fit_end_preferences(counted$data, k, by_length, ridge, maxit)
+  dispersion <- estimate_dmn_alpha_from_opportunities(
+    counted$data, fit, dmn_min_reads, dmn_min_sites
+  )
+  fit$dmn_alpha_scale <- dispersion$scale
+  fit$sequence_bias <- learned_sequence_bias(
+    fit$diagnostics$codon_weights, dispersion$scale
+  )
+  fit$diagnostics$dmn_alpha <- dispersion$diagnostics
+  fit$diagnostics$reads <- c(observed$diagnostics, counted$diagnostics)
+  fit$provenance <- list(
+    bam = normalizePath(bam), fasta = normalizePath(fasta),
+    transcript_ids = names(transcripts), distribution = distribution,
+    site_reference = geometry$site_reference, k = k, by_length = by_length,
+    min_mapq = min_mapq, ridge = ridge, maxit = maxit,
+    dmn_min_reads = dmn_min_reads, dmn_min_sites = dmn_min_sites,
+    model = paste("conditional multinomial: transcript:length + codon +",
+                  "5prime + 3prime; robust DMN moment concentration"),
+    created = as.character(Sys.time()), package_version = as.character(utils::packageVersion("coverageSim"))
+  )
+  class(fit) <- c("covsim_end_bias_fit", "list")
+  fit
+}
+
+validate_end_learning_input <- function(bam, fasta, transcripts, cds, k,
+                                        by_length, min_mapq, ridge, maxit,
+                                        dmn_min_reads, dmn_min_sites) {
+  for (path in list(bam, fasta)) {
+    if (!is.character(path) || length(path) != 1L || !file.exists(path)) {
+      stop("bam and fasta must name existing files")
+    }
+  }
+  for (ranges in list(transcripts, cds)) {
+    ids <- names(ranges)
+    if (!methods::is(ranges, "GRangesList") || !length(ranges) ||
+        is.null(ids) || anyNA(ids) || any(!nzchar(ids)) || anyDuplicated(ids)) {
+      stop("transcripts and cds must be nonempty GRangesLists with unique names")
+    }
+  }
+  if (!setequal(names(transcripts), names(cds))) stop("Transcript and CDS names must match")
+  scalar <- function(x, lower, upper = Inf, integer = FALSE) {
+    is.numeric(x) && length(x) == 1L && is.finite(x) &&
+      x >= lower && x <= upper && (!integer || x == floor(x))
+  }
+  if (!scalar(k, 1, 3, TRUE)) stop("k must be an integer from 1 to 3")
+  if (!is.logical(by_length) || length(by_length) != 1L || is.na(by_length)) {
+    stop("by_length must be TRUE or FALSE")
+  }
+  if (!scalar(min_mapq, 0, 255, TRUE)) stop("min_mapq must be between 0 and 255")
+  if (!scalar(ridge, .Machine$double.eps)) stop("ridge must be positive and finite")
+  if (!scalar(maxit, 1, Inf, TRUE)) stop("maxit must be a positive integer")
+  if (!scalar(dmn_min_reads, 1, Inf, TRUE)) {
+    stop("dmn_min_reads must be a positive integer")
+  }
+  if (!scalar(dmn_min_sites, 2, Inf, TRUE)) {
+    stop("dmn_min_sites must be an integer of at least two")
+  }
+}
+
+# Require a contiguous, complete CDS in transcript coordinates, even across introns.
+learning_cds_positions <- function(model, cds) {
+  if (any(as.character(GenomicRanges::seqnames(cds)) !=
+          as.character(GenomicRanges::seqnames(model$exons)[1])) ||
+      any(as.character(GenomicRanges::strand(cds)) != model$strand)) {
+    stop("CDS chromosome/strand does not match transcript ", model$transcript_id)
+  }
+  positions <- unlist(IRanges::IntegerList(lapply(seq_along(cds), function(i) {
+    seq.int(GenomicRanges::start(cds)[i], GenomicRanges::end(cds)[i])
+  })), use.names = FALSE)
+  mapped <- sort(vapply(positions, function(p) genomic_site_to_transcript(model, p), integer(1)))
+  if (length(mapped) != length(positions) || anyNA(mapped) ||
+      length(mapped) %% 3L != 0L || any(diff(mapped) != 1L)) {
+    stop("CDS must be complete and contiguous within transcript ", model$transcript_id)
+  }
+  mapped[seq.int(1L, length(mapped), by = 3L)]
+}
+
+end_learning_opportunities <- function(models, cds, distribution, k) {
+  data.table::rbindlist(lapply(models, function(model) {
+    sites <- learning_cds_positions(model, cds[[model$transcript_id]])
+    data.table::rbindlist(lapply(seq_len(nrow(distribution)), function(i) {
+      length_value <- distribution$fragment_length[i]
+      starts <- sites - distribution$site_offset[i]
+      valid <- starts >= 1L & starts + length_value - 1L <= model$length
+      sites <- sites[valid]
+      starts <- starts[valid]
+      if (!length(sites)) return(NULL)
+      sequences <- substring(model$sequence, starts, starts + length_value - 1L)
+      codons <- substring(model$sequence, sites, sites + 2L)
+      alignments <- lapply(starts, function(p) transcript_fragment_alignment(model, p, length_value))
+      result <- data.table::data.table(
+        transcript_id = model$transcript_id, fragment_length = length_value,
+        site_tx = sites,
+        position = vapply(alignments, `[[`, integer(1), "pos"),
+        cigar = vapply(alignments, `[[`, character(1), "cigar"),
+        chromosome = as.character(GenomicRanges::seqnames(model$exons)[1]),
+        strand = model$strand, codon = codons,
+        five = substring(sequences, 1L, k),
+        three = substring(sequences, length_value - k + 1L, length_value)
+      )
+      result[grepl("^[ACGT]+$", sequences) & grepl("^[ACGT]{3}$", codon)]
+    }))
+  }))
+}
+
+dmn_alpha_moment <- function(observed, expected, nt_positions) {
+  total <- sum(observed)
+  sites <- length(observed)
+  if (sites < 2L || total <= 1L || length(expected) != sites ||
+      length(nt_positions) != 1L || nt_positions < sites ||
+      any(!is.finite(c(observed, expected))) || any(observed < 0) ||
+      any(expected <= 0)) {
+    return(data.table::data.table(
+      reads = total, sites = sites, inflation = NA_real_,
+      alpha_total = NA_real_, dmn_alpha_scale = NA_real_, boundary = "invalid"
+    ))
+  }
+  probability <- expected / sum(expected)
+  pearson <- sum((observed - total * probability)^2 /
+                   (total * probability))
+  inflation <- pearson / (sites - 1L)
+  boundary <- "interior"
+  if (inflation <= 1) {
+    alpha_total <- Inf
+    scale <- 1e6
+    boundary <- "multinomial_limit"
+  } else if (inflation >= total) {
+    alpha_total <- 0
+    scale <- 1e-8
+    boundary <- "maximum_overdispersion"
+  } else {
+    alpha_total <- (total - inflation) / (inflation - 1)
+    scale <- alpha_total / nt_positions
+  }
+  data.table::data.table(
+    reads = total, sites = sites, inflation = inflation,
+    alpha_total = alpha_total, dmn_alpha_scale = scale, boundary = boundary
+  )
+}
+
+end_profile_weights <- function(profile, motif, fragment_length) {
+  table <- profile$table
+  if ("fragment_length" %in% names(table)) {
+    key <- paste(table$kmer, table$fragment_length, sep = ":")
+    index <- match(paste(motif, fragment_length, sep = ":"), key)
+  } else {
+    index <- match(motif, table$kmer)
+  }
+  result <- table$weight[index]
+  if (anyNA(result)) stop("Learned end profile is missing an observed motif")
+  result
+}
+
+estimate_dmn_alpha_from_opportunities <- function(opportunities, fit,
+                                                   min_reads, min_sites) {
+  data <- data.table::copy(opportunities)
+  codon_weight <- fit$diagnostics$codon_weights$weight[
+    match(data$codon, fit$diagnostics$codon_weights$codon)
+  ]
+  data[, expected_weight :=
+         codon_weight *
+         end_profile_weights(fit$five_prime_bias, five, fragment_length) *
+         end_profile_weights(fit$three_prime_bias, three, fragment_length)]
+  if (any(!is.finite(data$expected_weight) | data$expected_weight <= 0)) {
+    stop("Fitted coverage weights must be finite and positive")
+  }
+  data[, group_reads := sum(count), by = .(transcript_id, fragment_length)]
+  data <- data[group_reads > 0]
+  data[, conditional_probability := expected_weight / sum(expected_weight),
+       by = .(transcript_id, fragment_length)]
+  sites <- data[, .(
+    observed = sum(count),
+    expected = sum(group_reads * conditional_probability)
+  ), by = .(transcript_id, site_tx)]
+  diagnostics <- sites[, {
+    result <- dmn_alpha_moment(observed, expected, nt_positions = 3L * .N)
+    result[, usable := reads >= min_reads & sites >= min_sites &
+             is.finite(dmn_alpha_scale)]
+    result
+  }, by = transcript_id]
+  usable <- diagnostics[usable == TRUE, dmn_alpha_scale]
+  if (!length(usable)) {
+    warning("DMN concentration could not be estimated; using fallback 1")
+    scale <- 1
+  } else {
+    scale <- stats::median(usable)
+  }
+  list(scale = scale, diagnostics = diagnostics)
+}
+
+learned_sequence_bias <- function(codon_weights, dmn_alpha_scale) {
+  alpha <- codon_weights$weight / mean(codon_weights$weight)
+  data.table::data.table(
+    variable = "learned", seqs = codon_weights$codon, alpha = alpha,
+    dmn_alpha_scale = dmn_alpha_scale
+  )
+}
+
+# Normalize explicit match/mismatch operations into M for reference compatibility.
+learning_alignment_cigar <- function(cigar) {
+  distinct <- unique(cigar)
+  normalized <- vapply(distinct, function(value) {
+    if (!grepl("^([0-9]+[M=XN])+$", value)) return(NA_character_)
+    widths <- as.integer(strsplit(value, "[M=XN]")[[1]])
+    ops <- strsplit(gsub("[0-9]+", "", value), "")[[1]]
+    ops[ops %in% c("=", "X")] <- "M"
+    runs <- cumsum(c(TRUE, tail(ops, -1L) != head(ops, -1L)))
+    paste0(as.vector(rowsum(widths, runs)), ops[!duplicated(runs)], collapse = "")
+  }, character(1), USE.NAMES = FALSE)
+  normalized[match(cigar, distinct)]
+}
+
+read_end_learning_bam <- function(bam, min_mapq) {
+  fields <- c("rname", "pos", "cigar", "strand", "flag", "mapq")
+  file <- Rsamtools::BamFile(bam, yieldSize = 500000L)
+  open(file)
+  on.exit(close(file))
+  reads <- data.table::data.table(chromosome = character(), position = integer(),
+    strand = character(), cigar = character(), count = integer())
+  diagnostics <- c(bam_records = 0, flag_or_mapq_or_NH_excluded = 0, unsupported_cigar = 0)
+  repeat {
+    raw <- Rsamtools::scanBam(file,
+      param = Rsamtools::ScanBamParam(what = fields, tag = "NH"))[[1]]
+    if (!length(raw$flag)) break
+    chunk <- filter_end_learning_reads(raw, min_mapq)
+    diagnostics <- diagnostics + chunk$diagnostics
+    reads <- data.table::rbindlist(list(reads, chunk$reads))[
+      , .(count = sum(count)), by = .(chromosome, position, strand, cigar)]
+  }
+  list(reads = reads, diagnostics = diagnostics)
+}
+
+filter_end_learning_reads <- function(raw, min_mapq) {
+  keep <- bitwAnd(raw$flag, 1L + 4L + 256L + 512L + 2048L) == 0L & raw$mapq >= min_mapq
+  if (!is.null(raw$tag$NH)) keep <- keep & (is.na(raw$tag$NH) | raw$tag$NH <= 1L)
+  cigar <- learning_alignment_cigar(raw$cigar[keep])
+  reads <- data.table::data.table(chromosome = as.character(raw$rname[keep]),
+    position = raw$pos[keep], strand = as.character(raw$strand[keep]), cigar = cigar)
+  reads <- reads[!is.na(cigar), .(count = .N), by = .(chromosome, position, strand, cigar)]
+  list(reads = reads, diagnostics = c(
+    bam_records = length(keep), flag_or_mapq_or_NH_excluded = sum(!keep),
+    unsupported_cigar = sum(is.na(cigar))))
+}
+
+count_end_learning_reads <- function(opportunities, reads) {
+  keys <- c("chromosome", "position", "strand", "cigar")
+  frequencies <- reads[, .(count = sum(count)), by = keys]
+  ambiguous <- opportunities[, .N, by = keys][N > 1L, ..keys]
+  eligible <- opportunities[!ambiguous, on = keys]
+  result <- merge(eligible, frequencies, by = keys, all.x = TRUE, sort = FALSE)
+  result[is.na(count), count := 0L]
+  used <- sum(result$count)
+  list(data = result, diagnostics = c(used = used,
+    unmatched_or_ambiguous = sum(reads$count) - used,
+    ambiguous_opportunities = nrow(opportunities) - nrow(eligible)))
+}
+
+end_motif_levels <- function(k) {
+  apply(expand.grid(rep(list(c("A", "C", "G", "T")), k)), 1L, paste0, collapse = "")
+}
+
+# Aggregate identical features: zero-count opportunities still contribute exposure.
+end_learning_design <- function(opportunities, k, by_length) {
+  data <- data.table::copy(opportunities)
+  data[, group := paste(transcript_id, fragment_length, sep = ":")]
+  totals <- data[, .(total = sum(count)), by = group][total > 0]
+  data <- merge(data, totals, by = "group")
+  if (!nrow(data)) stop("No groups with usable reads")
+  data <- data[, .(count = sum(count), exposure = .N, total = total[1]),
+               by = .(group, fragment_length, codon, five, three)]
+  lengths <- sort(unique(data$fragment_length))
+  motifs <- end_motif_levels(k)
+  labels <- if (by_length) as.vector(outer(motifs, lengths, paste, sep = ":")) else motifs
+  five <- if (by_length) paste(data$five, data$fragment_length, sep = ":") else data$five
+  three <- if (by_length) paste(data$three, data$fragment_length, sep = ":") else data$three
+  codons <- end_motif_levels(3L)
+  index <- cbind(match(five, labels), length(labels) + match(three, labels),
+                 2L * length(labels) + match(data$codon, codons))
+  list(data = data, index = index, groups = match(data$group, unique(data$group)),
+       motifs = motifs, labels = labels, lengths = lengths, codons = codons)
+}
+
+fit_end_preferences <- function(opportunities, k, by_length, ridge, maxit) {
+  design <- end_learning_design(opportunities, k, by_length)
+  data <- design$data
+  index <- design$index
+  n_parameters <- 2L * length(design$labels) + length(design$codons)
+  evaluate <- function(beta, gradient = FALSE) {
+    eta <- rowSums(matrix(beta[index], nrow = nrow(index))) + log(data$exposure)
+    maxima <- as.numeric(tapply(eta, design$groups, max))
+    shifted <- exp(eta - maxima[design$groups])
+    sums <- as.numeric(rowsum(shifted, design$groups, reorder = FALSE))
+    logp <- eta - maxima[design$groups] - log(sums[design$groups])
+    if (!gradient) return(-sum(data$count * logp) + ridge * sum(beta^2) / 2)
+    residual <- data$total * exp(logp) - data$count
+    values <- rowsum(rep(residual, 3L), as.vector(index), reorder = TRUE)
+    result <- ridge * beta
+    result[as.integer(rownames(values))] <- result[as.integer(rownames(values))] + values[, 1]
+    result
+  }
+  fit <- stats::optim(rep(0, n_parameters), evaluate,
+    gr = function(beta) evaluate(beta, TRUE), method = "L-BFGS-B",
+    control = list(maxit = maxit, factr = 1e7))
+  if (fit$convergence != 0L) stop("End-bias fit did not converge: ", fit$message)
+  make_profile <- function(offset) {
+    table <- data.table::data.table(kmer = rep(design$motifs,
+      if (by_length) length(design$lengths) else 1L),
+      weight = exp(fit$par[offset + seq_along(design$labels)]))
+    if (by_length) table[, fragment_length := rep(design$lengths, each = length(design$motifs))]
+    list(source = "learned", table = table, strength = 1)
+  }
+  list(five_prime_bias = make_profile(0L),
+       three_prime_bias = make_profile(length(design$labels)),
+       diagnostics = list(convergence = fit$convergence, objective = fit$value,
+         transcripts = data.table::uniqueN(opportunities[count > 0, transcript_id]),
+         groups = max(design$groups), opportunities = sum(data$exposure),
+         codon_weights = data.table::data.table(codon = design$codons,
+           weight = exp(tail(fit$par, length(design$codons)))),
+         motif_counts = opportunities[, .(reads = sum(count), opportunities = .N),
+           by = .(fragment_length, five, three)]))
+}

@@ -329,3 +329,95 @@ test_that("simNGScoverage writes BAM output through the format-specific writer",
   expect_true(file.exists(bam_path))
   expect_gt(length(Rsamtools::scanBam(bam_path)[[1]]$pos), 0)
 })
+
+test_that("active end selection runs through MN and DMN with conserved transcript counts", {
+  set.seed(71)
+  fixture <- make_simulation_fixture(max_uorfs = 0, regions = "cds")
+  for (mode in c("MN", "DMN", "DMN_smearing")) {
+    truth_dir <- tempfile("end-selection-truth-")
+    experiment <- run_simulated_experiment(fixture,
+      seq_bias = if (mode == "DMN_smearing") load_seq_bias(bias = "R10") else NULL,
+      rnase_bias = list(RFP = if (mode == "DMN_smearing") c(0.5, 2, 1, 10, 2, 1, 0.5) else NULL),
+      auto_correlation = NULL,
+      sampling = list(cds = list(RFP = if (mode == "MN") "MN" else "DMN")),
+      read_lengths_per = list(RFP = 28L), ground_truth = truth_dir,
+      fragment_geometry = list(source = "user", site_offset = 15L,
+        five_prime_bias = list(source = "user", strength = 1,
+          table = make_synthetic_end_bias(enriched_weight = 4))))
+    truth <- data.table::fread(list.files(truth_dir, full.names = TRUE)[1])
+    expected <- SummarizedExperiment::assay(fixture$region_count_table, "cds")[, 1]
+    observed <- truth[, .(count = sum(score)), by = transcript_id]
+    expect_equal(observed$count[match(names(expected), observed$transcript_id)],
+                 unname(expected))
+    expect_true(all(truth$fragment_length == 28))
+    imported <- ORFik::fimport(ORFik::filepath(experiment, "default")[1])
+    expect_equal(sum(S4Vectors::mcols(imported)$score), sum(expected))
+  }
+})
+
+test_that("dmn_alpha_scale controls positional roughness without changing read totals", {
+  set.seed(720)
+  fixture <- make_simulation_fixture(max_uorfs = 0, regions = "cds")
+  for (assay_name in c("gene", "cds")) {
+    SummarizedExperiment::assay(
+      fixture$region_count_table, assay_name
+    )[, 1] <- 10000L
+  }
+  run_scale <- function(scale, seq_bias = NULL) {
+    set.seed(721)
+    experiment <- run_simulated_experiment(
+      fixture,
+      fragment_mode = "legacy_point",
+      seq_bias = seq_bias,
+      ideal_coverage = list(cds = list(RFP = quote(rep(1, x)))),
+      rnase_bias = list(RFP = NULL),
+      auto_correlation = NULL,
+      sampling = list(cds = list(RFP = "DMN")),
+      dmn_alpha_scale = scale
+    )
+    reads <- ORFik::fimport(ORFik::filepath(experiment, "default")[1])
+    data.table::data.table(
+      seqnames = as.character(GenomicRanges::seqnames(reads)),
+      score = S4Vectors::mcols(reads)$score
+    )[, .(
+      total = sum(score),
+      peak_fraction = max(score) / sum(score),
+      occupied_positions = .N
+    ), by = seqnames]
+  }
+
+  rough <- run_scale(0.001)
+  smooth <- run_scale(100)
+  expect_equal(sum(rough$total), 60000)
+  expect_equal(sum(smooth$total), 60000)
+  expect_gt(stats::median(rough$peak_fraction),
+            5 * stats::median(smooth$peak_fraction))
+  expect_lt(stats::median(rough$occupied_positions),
+            stats::median(smooth$occupied_positions))
+
+  learned_profile <- load_seq_bias()
+  learned_profile[, dmn_alpha_scale := 0.001]
+  automatic <- run_scale(NULL, learned_profile)
+  explicit <- run_scale(0.001, learned_profile)
+  expect_equal(automatic, explicit)
+})
+
+test_that("shuffled input counts remain attached to their transcript identifiers", {
+  set.seed(911)
+  fixture <- make_simulation_fixture(max_uorfs = 0, regions = "cds", seqnames = "chr1")
+  table <- fixture$region_count_table[c(6, 2, 4, 1, 5, 3), 1]
+  values <- c(101L, 203L, 307L, 409L, 503L, 607L)
+  for (assay in c("gene", "cds")) SummarizedExperiment::assay(table, assay)[, 1] <- values
+  fixture$region_count_table <- table
+  for (strength in c(0, 1)) {
+    dir <- tempfile("shuffled-counts-truth-")
+    run_simulated_experiment(fixture, seq_bias = NULL, auto_correlation = NULL,
+      rnase_bias = list(RFP = NULL), ground_truth = dir,
+      fragment_geometry = list(source = "user", site_offset = 15L,
+        five_prime_bias = list(source = "user", strength = strength,
+          table = make_synthetic_end_bias())))
+    truth <- data.table::fread(list.files(dir, full.names = TRUE)[1])
+    actual <- truth[, .(reads = sum(score)), by = transcript_id]
+    expect_equal(actual$reads[match(rownames(table), actual$transcript_id)], values)
+  }
+})

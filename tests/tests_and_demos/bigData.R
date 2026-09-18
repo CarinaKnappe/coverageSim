@@ -19,9 +19,9 @@ if (is.na(n_genes) || n_genes < 1L) {
 }
 
 bias_profile <- Sys.getenv(
-  "COVSIM_BIGDATA_BIAS_PROFILE", unset = "start_codon"
+  "COVSIM_BIGDATA_BIAS_PROFILE", unset = "median"
 )
-allowed_bias_profiles <- c("start_codon", "stop_codon", "similar")
+allowed_bias_profiles <- c("median", "start_codon", "stop_codon", "similar")
 if (!bias_profile %in% allowed_bias_profiles) {
   stop(
     "COVSIM_BIGDATA_BIAS_PROFILE must select one profile: ",
@@ -29,8 +29,16 @@ if (!bias_profile %in% allowed_bias_profiles) {
   )
 }
 bias_profile_id <- c(
-  start_codon = "R2", stop_codon = "R1", similar = "R10"
+  median = "median", start_codon = "R2", stop_codon = "R1", similar = "R10"
 )[[bias_profile]]
+
+dmn_alpha_scale <- as.numeric(Sys.getenv(
+  "COVSIM_BIGDATA_DMN_ALPHA_SCALE", unset = "1"
+))
+if (length(dmn_alpha_scale) != 1L || !is.finite(dmn_alpha_scale) ||
+    dmn_alpha_scale <= 0) {
+  stop("COVSIM_BIGDATA_DMN_ALPHA_SCALE must be one finite number greater than zero")
+}
 
 run_tag <- Sys.getenv(
   "COVSIM_BIGDATA_RUN_TAG",
@@ -57,8 +65,10 @@ set.seed(seed)
 
 data.table::fwrite(
   data.table::data.table(
-    setting = c("n_genes", "seed", "bias_profile", "bias_profile_id"),
-    value = c(n_genes, seed, bias_profile, bias_profile_id)
+    setting = c(
+      "n_genes", "seed", "bias_profile", "bias_profile_id", "dmn_alpha_scale"
+    ),
+    value = c(n_genes, seed, bias_profile, bias_profile_id, dmn_alpha_scale)
   ),
   file.path(out_base, "simulation_settings.tsv"),
   sep = "\t"
@@ -156,6 +166,7 @@ exp <- simNGScoverage(
     cds = list(RFP = shapes(9)),
     uorf = list(RFP = shapes(9))
   ),
+  dmn_alpha_scale = dmn_alpha_scale,
   fragment_geometry = list(
     source = "default",
     site_reference = "a_site",

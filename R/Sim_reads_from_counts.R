@@ -36,14 +36,22 @@
 #' cds =    list(RFP = "DMN"),
 #' trailer =list(RFP = "MN"),
 #' uorf =   list(RFP = "DMN"))
+#' @param dmn_alpha_scale NULL or a positive numeric scalar. NULL (default) uses
+#' a unique dmn_alpha_scale stored in seq_bias, as produced by learn_end_bias(),
+#' and otherwise falls back to 1. The value multiplies the final Step-4
+#' Dirichlet alpha vector immediately before sampling. Values below 1 increase
+#' position-to-position variation, producing more isolated peaks and zeros;
+#' values above 1 make coverage smoother. Relative expected coverage and the
+#' total read count per transcript region remain unchanged. This parameter
+#' affects only regions using \code{sampling = "DMN"}.
 #' @param libClasses = list(RFP = "GRanges", RNA = "GAlignment", CAGE = "GRanges", PAS = "GRanges")
 #' @param libFormats The output formats, a named list of characters:
 #'  list(RFP = "ofst", RNA = "ofst", CAGE = "ofst", PAS = "ofst"). Alternatives:
 #'  "sam" and "bam".
 #' @param true_uorf_ranges = "AUTO". Load from uorf string in 'simGenome'.
 #' @param seq_bias the sequence bias used for simulation, default:
-#' load_seq_bias(), the Ribosome profiling estimates from Amino acid dwell times from
-#' P-site shifted reads from library "R2" from the coverageSim paper. Specifically it is:
+#' load_seq_bias(), the motif-wise median of the amino-acid alpha estimates from
+#' P-site shifted reads in libraries R1--R10 from the coverageSim paper. Specifically it is:
 #' a data.table with correctly named columns:
 #'  "seq", "alpha"\cr
 #'  the column seq (Amino acid, 1 letter per)
@@ -72,11 +80,14 @@
 #' (`"p_site"` or `"a_site"`), a joint `distribution` with fragment_length,
 #' site_offset, and probability columns, and `boundary_action`. The default
 #' `"renormalize"` conditions probabilities on valid boundary geometry and
-#' preserves counts; `"error"` rejects impossible geometry. End-bias source
-#' fields are reserved and currently must be `list(source = "none")`.
+#' preserves counts; `"error"` rejects impossible geometry.
 #' End-bias sources may also be `"user"` or `"learned"` with a table of
 #' `kmer`, `weight`, and optionally `fragment_length`; use
 #' \code{make_synthetic_end_bias()} to create a simple explicit profile.
+#' Each end accepts `strength` (default 1): 0 disables it, 0.5 weakens it,
+#' and values above 1 strengthen it using weight^strength. Active end biases
+#' jointly weight sites and fragment geometry before the final read draw,
+#' preserving each transcript/region read budget and the input site support.
 #' @param ground_truth FALSE, TRUE, or a directory path. In simulated-RPF mode, TRUE
 #' writes one compressed fragment truth table next to each simulated library.
 #' @param debug_coverage logical, default FALSE. If TRUE, debug steps of coverage calculation,
@@ -115,6 +126,7 @@ simNGScoverage <- function(simGenome,
                                            cds =    list(RFP = "DMN"),
                                            trailer =list(RFP = "MN"),
                                            uorf =   list(RFP = "DMN")),
+                           dmn_alpha_scale = NULL,
                            libClasses = list(RFP = "GRanges", RNA = "GAlignment",
                                              CAGE = "GRanges", PAS = "GRanges"),
                            libFormats = list(RFP = "ofst", RNA = "ofst",
@@ -133,6 +145,7 @@ simNGScoverage <- function(simGenome,
                            debug_coverage = FALSE) {
   fragment_mode <- match.arg(fragment_mode)
   validate_sequence_profile(seq_bias)
+  dmn_alpha_scale <- resolve_dmn_alpha_scale(dmn_alpha_scale, seq_bias)
   if (fragment_mode == "physical") {
     warning("fragment_mode = 'physical' is deprecated; use 'simulated_rpf'")
     fragment_mode <- "simulated_rpf"
@@ -148,6 +161,21 @@ simNGScoverage <- function(simGenome,
   }
   loadRegions(txdb, parts = regionsToSample[!(regionsToSample %in% "uorf")],
               envir = environment(), extension = "_ranges", names.keep = transcripts)
+  # Annotation loaders need not preserve the requested transcript order.
+  # Keep every region's tiling aligned with the count-table row identifiers.
+  count_table <- count_table[transcripts, ]
+  for (region in setdiff(regionsToSample, "uorf")) {
+    object <- paste0(region, "_ranges")
+    ranges <- get(object, envir = environment())
+    index <- match(rownames(count_table), names(ranges))
+    if (anyNA(index)) stop("Missing ", region, " annotation for requested transcripts")
+    assign(object, ranges[index], envir = environment())
+  }
+  if ("uorf" %in% regionsToSample) {
+    keep <- txNames(uorf_ranges) %in% transcripts
+    uorf_ranges <- uorf_ranges[keep]
+    if (uorf_prop_mode == "numeric") uorf_prop_within_gene <- uorf_prop_within_gene[keep]
+  }
   if ("cds" %in% regionsToSample) {
     if (any((widthPerGroup(cds_ranges, FALSE) %% 3) != 0)) {
       warning("Detected CDS ranges that ends on incomplete codon (is not %% 3 == 0 in length")
@@ -174,12 +202,16 @@ simNGScoverage <- function(simGenome,
     message("-- ", assay_column)
 
     libClass <- unlist(libClasses[libtypes[s]], use.names = FALSE)
+    defer_counts <- fragment_mode == "simulated_rpf" && libtypes[s] == "RFP" &&
+      has_active_end_bias(fragment_geometry)
     # Step 4 (NT coverage distribution)
     dt_final <- nt_coverage_all_regions(count_table[, s], libClass, ideal_coverage,
                                         rnase_bias, auto_correlation, read_lengths_per,
                                         uorf_ranges, uorf_prop_mode,
                                         uorf_prop_within_gene, sampling,
-                                        debug_coverage, env = environment())
+                                        dmn_alpha_scale,
+                                        debug_coverage, env = environment(),
+                                        defer_counts = defer_counts)
     # Verify all reads have been distributed correctly
     expected_counts <- data.table::data.table(
       seqnames = assay_by_chromosome$seqnamesPer,
@@ -188,7 +220,7 @@ simNGScoverage <- function(simGenome,
     actual_counts <- dt_final[, .(actual = sum(score)), by = "seqnames"]
     count_check <- merge(expected_counts, actual_counts, by = "seqnames", all = TRUE)
     count_check[is.na(count_check)] <- 0
-    stopifnot(all(count_check$expected == count_check$actual))
+    stopifnot(isTRUE(all.equal(count_check$expected, count_check$actual)))
     dt_final <- dt_final[score > 0,]
     simulated_rpf <- fragment_mode == "simulated_rpf" && libtypes[s] == "RFP"
     if (simulated_rpf) {
@@ -198,7 +230,7 @@ simNGScoverage <- function(simGenome,
         fragment_lengths = unlist(read_lengths_per[libtypes[s]], use.names = FALSE),
         fragment_geometry = fragment_geometry
       )
-      stopifnot(sum(fragment_table$score) == sum(dt_final$score))
+      stopifnot(isTRUE(all.equal(sum(fragment_table$score), sum(dt_final$score))))
       gr_final <- simulated_rpf_alignments(
         fragment_table,
         seqinfo = GenomeInfoDb::seqinfo(mrna_ranges)
@@ -250,8 +282,8 @@ nt_coverage_all_regions <- function(count_table_regions, libClass,
                                     rnase_bias, auto_correlation,
                                     read_lengths_per, uorf_ranges,
                                     uorf_prop_mode, uorf_prop_within_gene,
-                                    sampling,
-                                    debug_coverage, env) {
+                                    sampling, dmn_alpha_scale,
+                                    debug_coverage, env, defer_counts = FALSE) {
   regionsToSample <- assayNames(count_table_regions)[-1]
   data.table::rbindlist(lapply(regionsToSample, function(region) {
     assay <- assay(count_table_regions, region)
@@ -282,19 +314,34 @@ nt_coverage_all_regions <- function(count_table_regions, libClass,
         res <- sim_sequence_bias(ideal_cov, lengths,
                                  alpha_matrix, auto_cor,
                                  rnase_bias[[libtype]])
-        res_lengths <- lengths(res)
-        res_matrix <- pack_alpha_rows(res, region_length_matrix)
-        #i <- 3; 57- sum(alpha_mat_3[i,] == 1e-24); lengths[i]
-        n_genes <- length(res)
-        sample <- extraDistr::rdirmnom(n = n_genes, size = region_counts,
-                                       alpha = res_matrix)
-        sample <- flatten_sample_rows(sample, res_lengths)
+        res <- scale_dmn_alpha(res, dmn_alpha_scale)
+        sampled_lengths <- lengths(res)
+        if (defer_counts) {
+          sample <- unlist(lapply(seq_along(res), function(i) {
+            draw_site_probabilities(res[[i]], dirichlet = TRUE) * region_counts[i]
+          }), use.names = FALSE)
+        } else {
+          res_lengths <- lengths(res)
+          res_matrix <- pack_alpha_rows(res, region_length_matrix)
+          #i <- 3; 57- sum(alpha_mat_3[i,] == 1e-24); lengths[i]
+          n_genes <- length(res)
+          sample <- extraDistr::rdirmnom(n = n_genes, size = region_counts,
+                                         alpha = res_matrix)
+          sample <- flatten_sample_rows(sample, res_lengths)
+        }
       } else { #MN
-        sample <- lapply(seq_along(region_ranges),
-                          function(y, fun, x = lengths[y])
-                            a <- as.vector(rmultinom(1, region_counts[y], eval(fun))),
-                            fun = ideal_cov)
+        sampled_lengths <- lengths
+        sample <- lapply(seq_along(region_ranges), function(y) {
+          x <- lengths[y]
+          weights <- eval(ideal_cov)
+          if (defer_counts) draw_site_probabilities(weights) * region_counts[y]
+          else as.vector(rmultinom(1, region_counts[y], weights))
+        })
         sample <- unlist(sample, use.names = FALSE)
+      }
+      if (defer_counts) {
+        dt_region[, sampling_group := rep(paste(region, seq_along(sampled_lengths), sep = ":"), sampled_lengths)]
+        dt_region[, read_count := rep(region_counts, sampled_lengths)]
       }
 
       dt_region <- dt_region[, !(colnames(dt_region) %in% c("AA", "genes", "position", "proportion")), with = FALSE]
@@ -319,3 +366,19 @@ nt_coverage_all_regions <- function(count_table_regions, libClass,
 # overlaps <- findOverlaps(RFP, mrna)
 # overlaps <- overlaps[!duplicated(from(overlaps))]
 # x_ir <- IRanges(start=start(RFP), width = readWidths(RFP), names = seq(length(RFP)))
+
+# Draw the latent DMN probabilities before applying technical library selection.
+draw_site_probabilities <- function(weights, dirichlet = FALSE) {
+  if (any(!is.finite(weights) | weights < 0) || !any(weights > 0)) {
+    stop("Site weights must be finite, non-negative and not all zero")
+  }
+  if (dirichlet) {
+    positive <- weights > 0
+    alpha <- weights[positive]
+    # Gamma augmentation avoids all-zero draws for very small alpha values.
+    log_weights <- log(stats::rgamma(length(alpha), alpha + 1)) +
+      log(stats::runif(length(alpha))) / alpha
+    weights[positive] <- exp(log_weights - max(log_weights))
+  }
+  weights / sum(weights)
+}

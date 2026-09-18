@@ -3,6 +3,9 @@
 .RData
 .Ruserdata
 
+# Local reference material and presentation files; never commit this directory.
+/git_ignore/
+
 *.2bit
 *.gtf
 BSgenome.Human.test.genc2522M/
@@ -28,3 +31,14 @@ tests/tests_and_demos/real_human_riboseq/
 /tests/testthat/test_deprecated_dataset_layout.R
 /tests/tests_and_demos/Parameter_settings_per_run.ods
 /tests/tests_and_demos/learn_from_HumanGenome.R
+
+# Local validation workflows that require external human data or RUST.
+/tests/tests_and_demos/figure3c_alpha_calibration.R
+/tests/tests_and_demos/real_input_validation.R
+/tests/testthat/natural_end_model_checks.py
+/tests/testthat/test_figure3c_alpha_calibration.R
+/tests/testthat/test_human_learning_rust.R
+/tests/testthat/test_natural_end_benchmark.R
+/tests/testthat/test_real_input_validation.R
+/tests/testthat/test_rust_end_libraries.R
+/tests/testthat/test_rust_large_benchmark.R
