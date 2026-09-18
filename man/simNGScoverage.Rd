@@ -33,7 +33,8 @@ simNGScoverage(
   fragment_mode = c("simulated_rpf", "legacy_point", "physical"),
   fragment_geometry = list(source = "default", site_reference = "a_site", distribution =
     NULL, boundary_action = "renormalize", five_prime_bias = list(source = "none"),
-    three_prime_bias = list(source = "none")),
+    three_prime_bias = list(source = "none"), codon_bias = list(source = "none"),
+    frame_bias = list(source = "none")),
   ground_truth = FALSE,
   debug_coverage = FALSE
 )
@@ -139,7 +140,11 @@ End-bias sources may also be `"user"` or `"learned"` with a table of
 Each end accepts `strength` (default 1): 0 disables it, 0.5 weakens it,
 and values above 1 strengthen it using weight^strength. Active end biases
 jointly weight sites and fragment geometry before the final read draw,
-preserving each transcript/region read budget and the input site support.}
+preserving each transcript/region read budget and the input site support.
+Length-specific `codon_bias` and `frame_bias` fields use the same source and
+strength convention; their tables contain codon/frame, fragment_length and
+weight columns. They act during physical-fragment selection and can be
+learned with `learn_end_bias(by_length = TRUE)`.}
 
 \item{ground_truth}{FALSE, TRUE, or a directory path. In simulated-RPF mode, TRUE
 writes one compressed fragment truth table next to each simulated library.}

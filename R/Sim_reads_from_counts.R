@@ -90,6 +90,10 @@
 #' and values above 1 strengthen it using weight^strength. Active end biases
 #' jointly weight sites and fragment geometry before the final read draw,
 #' preserving each transcript/region read budget and the input site support.
+#' Length-specific `codon_bias` and `frame_bias` fields use the same source and
+#' strength convention; their tables contain codon/frame, fragment_length and
+#' weight columns. They act during physical-fragment selection and can be
+#' learned with `learn_end_bias(by_length = TRUE)`.
 #' @param ground_truth FALSE, TRUE, or a directory path. In simulated-RPF mode, TRUE
 #' writes one compressed fragment truth table next to each simulated library.
 #' @param debug_coverage logical, default FALSE. If TRUE, debug steps of coverage calculation,
@@ -141,7 +145,9 @@ simNGScoverage <- function(simGenome,
                              source = "default", site_reference = "a_site",
                              distribution = NULL, boundary_action = "renormalize",
                              five_prime_bias = list(source = "none"),
-                             three_prime_bias = list(source = "none")
+                             three_prime_bias = list(source = "none"),
+                             codon_bias = list(source = "none"),
+                             frame_bias = list(source = "none")
                            ),
                            ground_truth = FALSE,
                            debug_coverage = FALSE) {
@@ -205,7 +211,7 @@ simNGScoverage <- function(simGenome,
 
     libClass <- unlist(libClasses[libtypes[s]], use.names = FALSE)
     defer_counts <- fragment_mode == "simulated_rpf" && libtypes[s] == "RFP" &&
-      has_active_end_bias(fragment_geometry)
+      has_active_fragment_bias(fragment_geometry)
     # Step 4 (NT coverage distribution)
     dt_final <- nt_coverage_all_regions(count_table[, s], libClass, ideal_coverage,
                                         rnase_bias, auto_correlation, read_lengths_per,

@@ -35,7 +35,10 @@ the biological 5-prime end to the first nucleotide of the reference codon.}
 
 \item{k}{End motif length, from 1 to 3. Default 1 is the most conservative fit.}
 
-\item{by_length}{Fit separate end preferences per length (default FALSE).}
+\item{by_length}{Fit separate end, codon and frame preferences per length
+(default FALSE). The pooled codon profile remains available for Step 4;
+length-specific residual codon and frame profiles are returned for fragment
+selection.}
 
 \item{min_mapq}{Minimum mapping quality (default 20). NH greater than 1,
 secondary, supplementary, failed-QC, paired and unmapped reads are excluded.
@@ -57,8 +60,9 @@ estimating the concentration. Default 20.}
 autocorrelation. Default 9.}
 }
 \value{
-A list containing five_prime_bias and three_prime_bias, ready to place
-  in fragment_geometry, plus sequence_bias and dmn_alpha_scale for Step 4,
+A list containing five_prime_bias, three_prime_bias, codon_bias and
+  frame_bias, ready to place in fragment_geometry, plus sequence_bias and
+  dmn_alpha_scale for Step 4,
   diagnostics and provenance. Passing sequence_bias to simNGScoverage() lets
   it use the learned dmn_alpha_scale automatically. Save with saveRDS().
   Each profile has source='learned' and strength=1. Unobserved motifs shrink

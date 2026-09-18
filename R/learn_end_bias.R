@@ -13,7 +13,10 @@
 #'   one site_offset per fragment_length. Offsets are zero-based distances from
 #'   the biological 5-prime end to the first nucleotide of the reference codon.
 #' @param k End motif length, from 1 to 3. Default 1 is the most conservative fit.
-#' @param by_length Fit separate end preferences per length (default FALSE).
+#' @param by_length Fit separate end, codon and frame preferences per length
+#'   (default FALSE). The pooled codon profile remains available for Step 4;
+#'   length-specific residual codon and frame profiles are returned for fragment
+#'   selection.
 #' @param min_mapq Minimum mapping quality (default 20). NH greater than 1,
 #'   secondary, supplementary, failed-QC, paired and unmapped reads are excluded.
 #'   Duplicate-flagged reads are retained; missing NH is allowed.
@@ -27,9 +30,9 @@
 #'   estimating the concentration. Default 20.
 #' @param acf_max_lag Maximum codon lag used to learn local coverage
 #'   autocorrelation. Default 9.
-#' @return A list containing five_prime_bias and three_prime_bias, ready to place
-#'   in fragment_geometry, plus sequence_bias and dmn_alpha_scale for Step 4,
-#'   diagnostics and provenance. Passing sequence_bias to simNGScoverage() lets
+#' @return A list containing five_prime_bias, three_prime_bias, codon_bias and
+#'   frame_bias, ready to place in fragment_geometry, plus sequence_bias and
+#'   dmn_alpha_scale for Step 4, diagnostics and provenance. Passing sequence_bias to simNGScoverage() lets
 #'   it use the learned dmn_alpha_scale automatically. Save with saveRDS().
 #'   Each profile has source='learned' and strength=1. Unobserved motifs shrink
 #'   towards neutral; confidence intervals are not provided. Only complete
@@ -62,6 +65,11 @@ learn_end_bias <- function(bam, fasta, transcripts, cds, fragment_geometry,
   counted <- count_end_learning_reads(opportunities, observed$reads)
   if (!sum(counted$data$count)) stop("No usable reads match the supplied CDS geometry")
   fit <- fit_end_preferences(counted$data, k, by_length, ridge, maxit)
+  frame_fit <- if (by_length) {
+    learn_length_frame_bias(observed$reads, models, cds, distribution)
+  } else {
+    list(profile = list(source = "none"), diagnostics = NULL)
+  }
   dispersion <- estimate_dmn_alpha_from_opportunities(
     counted$data, fit, dmn_min_reads, dmn_min_sites
   )
@@ -72,8 +80,11 @@ learn_end_bias <- function(bam, fasta, transcripts, cds, fragment_geometry,
   fit$sequence_bias <- learned_sequence_bias(
     fit$diagnostics$codon_weights, dispersion$scale
   )
+  fit$codon_bias <- learned_length_codon_bias(fit$diagnostics$codon_weights)
+  fit$frame_bias <- frame_fit$profile
   fit$diagnostics$dmn_alpha <- dispersion$diagnostics
   fit$diagnostics$auto_correlation <- structure$acf
+  fit$diagnostics$frame_counts <- frame_fit$diagnostics
   fit$diagnostics$reads <- c(observed$diagnostics, counted$diagnostics)
   fit$provenance <- list(
     bam = normalizePath(bam), fasta = normalizePath(fasta),
@@ -227,9 +238,9 @@ end_profile_weights <- function(profile, motif, fragment_length) {
 estimate_dmn_alpha_from_opportunities <- function(opportunities, fit,
                                                    min_reads, min_sites) {
   data <- data.table::copy(opportunities)
-  codon_weight <- fit$diagnostics$codon_weights$weight[
-    match(data$codon, fit$diagnostics$codon_weights$codon)
-  ]
+  codon_weight <- codon_profile_weights(
+    fit$diagnostics$codon_weights, data$codon, data$fragment_length
+  )
   data[, expected_weight :=
          codon_weight *
          end_profile_weights(fit$five_prime_bias, five, fragment_length) *
@@ -339,10 +350,69 @@ coverage_roughness_qc <- function(sites) {
 }
 
 learned_sequence_bias <- function(codon_weights, dmn_alpha_scale) {
-  alpha <- codon_weights$weight / mean(codon_weights$weight)
+  weights <- data.table::copy(codon_weights)
+  if ("fragment_length" %in% names(weights)) {
+    weights[, normalized := weight / mean(weight), by = fragment_length]
+    weights <- weights[, .(weight = exp(mean(log(normalized)))), by = codon]
+  }
+  alpha <- weights$weight / mean(weights$weight)
   data.table::data.table(
-    variable = "learned", seqs = codon_weights$codon, alpha = alpha,
+    variable = "learned", seqs = weights$codon, alpha = alpha,
     dmn_alpha_scale = dmn_alpha_scale
+  )
+}
+
+codon_profile_weights <- function(table, codon, fragment_length) {
+  if ("fragment_length" %in% names(table)) {
+    key <- paste(table$codon, table$fragment_length, sep = ":")
+    index <- match(paste(codon, fragment_length, sep = ":"), key)
+  } else {
+    index <- match(codon, table$codon)
+  }
+  result <- table$weight[index]
+  if (anyNA(result)) stop("Learned codon profile is missing an opportunity")
+  result
+}
+
+learned_length_codon_bias <- function(codon_weights) {
+  if (!"fragment_length" %in% names(codon_weights)) {
+    return(list(source = "none"))
+  }
+  table <- data.table::copy(codon_weights)
+  table[, normalized := weight / mean(weight), by = fragment_length]
+  pooled <- table[, .(pooled = exp(mean(log(normalized)))), by = codon]
+  table <- merge(table, pooled, by = "codon", sort = FALSE)
+  table[, weight := normalized / pooled]
+  table[, weight := weight / mean(weight), by = fragment_length]
+  list(source = "learned", strength = 1,
+       table = table[, .(codon, fragment_length, weight)])
+}
+
+learn_length_frame_bias <- function(reads, models, cds, distribution,
+                                    pseudocount = 0.5) {
+  projected <- project_region_learning_reads(reads, models, distribution)$reads
+  bounds <- data.table::rbindlist(lapply(models, function(model) {
+    sites <- learning_cds_positions(model, cds[[model$transcript_id]])
+    data.table::data.table(
+      transcript_id = model$transcript_id,
+      cds_start = sites[1L], cds_end = sites[length(sites)] + 2L
+    )
+  }))
+  projected <- merge(projected, bounds, by = "transcript_id")
+  projected <- projected[site_tx >= cds_start & site_tx <= cds_end]
+  projected[, frame := as.integer((site_tx - cds_start) %% 3L)]
+  lengths <- sort(unique(distribution$fragment_length))
+  grid <- data.table::CJ(fragment_length = lengths, frame = 0:2, unique = TRUE)
+  counts <- projected[, .(reads = sum(count)), by = .(fragment_length, frame)]
+  counts <- merge(grid, counts, by = c("fragment_length", "frame"), all.x = TRUE)
+  counts[is.na(reads), reads := 0]
+  counts[, probability := (reads + pseudocount) / sum(reads + pseudocount),
+         by = fragment_length]
+  counts[, weight := probability / mean(probability), by = fragment_length]
+  list(
+    profile = list(source = "learned", strength = 1,
+      table = counts[, .(frame, fragment_length, weight)]),
+    diagnostics = counts
   )
 }
 
@@ -445,17 +515,24 @@ end_learning_design <- function(opportunities, k, by_length) {
   five <- if (by_length) paste(data$five, data$fragment_length, sep = ":") else data$five
   three <- if (by_length) paste(data$three, data$fragment_length, sep = ":") else data$three
   codons <- end_motif_levels(3L)
+  codon_labels <- if (by_length) {
+    as.vector(outer(codons, lengths, paste, sep = ":"))
+  } else codons
+  codon <- if (by_length) {
+    paste(data$codon, data$fragment_length, sep = ":")
+  } else data$codon
   index <- cbind(match(five, labels), length(labels) + match(three, labels),
-                 2L * length(labels) + match(data$codon, codons))
+                 2L * length(labels) + match(codon, codon_labels))
   list(data = data, index = index, groups = match(data$group, unique(data$group)),
-       motifs = motifs, labels = labels, lengths = lengths, codons = codons)
+       motifs = motifs, labels = labels, lengths = lengths, codons = codons,
+       codon_labels = codon_labels)
 }
 
 fit_end_preferences <- function(opportunities, k, by_length, ridge, maxit) {
   design <- end_learning_design(opportunities, k, by_length)
   data <- design$data
   index <- design$index
-  n_parameters <- 2L * length(design$labels) + length(design$codons)
+  n_parameters <- 2L * length(design$labels) + length(design$codon_labels)
   evaluate <- function(beta, gradient = FALSE) {
     eta <- rowSums(matrix(beta[index], nrow = nrow(index))) + log(data$exposure)
     maxima <- as.numeric(tapply(eta, design$groups, max))
@@ -480,13 +557,22 @@ fit_end_preferences <- function(opportunities, k, by_length, ridge, maxit) {
     if (by_length) table[, fragment_length := rep(design$lengths, each = length(design$motifs))]
     list(source = "learned", table = table, strength = 1)
   }
+  codon_table <- data.table::data.table(
+    codon = rep(design$codons,
+      if (by_length) length(design$lengths) else 1L),
+    weight = exp(tail(fit$par, length(design$codon_labels)))
+  )
+  if (by_length) {
+    codon_table[, fragment_length := rep(
+      design$lengths, each = length(design$codons)
+    )]
+  }
   list(five_prime_bias = make_profile(0L),
        three_prime_bias = make_profile(length(design$labels)),
        diagnostics = list(convergence = fit$convergence, objective = fit$value,
          transcripts = data.table::uniqueN(opportunities[count > 0, transcript_id]),
          groups = max(design$groups), opportunities = sum(data$exposure),
-         codon_weights = data.table::data.table(codon = design$codons,
-           weight = exp(tail(fit$par, length(design$codons)))),
+         codon_weights = codon_table,
          motif_counts = opportunities[, .(reads = sum(count), opportunities = .N),
            by = .(fragment_length, five, three)]))
 }

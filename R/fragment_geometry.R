@@ -6,7 +6,9 @@ normalize_fragment_geometry <- function(fragment_geometry) {
     site_offset = NULL,
     boundary_action = "renormalize",
     five_prime_bias = list(source = "none"),
-    three_prime_bias = list(source = "none")
+    three_prime_bias = list(source = "none"),
+    codon_bias = list(source = "none"),
+    frame_bias = list(source = "none")
   )
   if (is.null(fragment_geometry)) return(defaults)
   stopifnot(is.list(fragment_geometry))
@@ -40,7 +42,65 @@ normalize_fragment_geometry <- function(fragment_geometry) {
     bias <- geometry[[bias_name]]
     geometry[[bias_name]] <- normalize_end_bias(bias, bias_name)
   }
+  geometry$codon_bias <- normalize_fragment_feature_bias(
+    geometry$codon_bias, "codon_bias", "codon"
+  )
+  geometry$frame_bias <- normalize_fragment_feature_bias(
+    geometry$frame_bias, "frame_bias", "frame"
+  )
   geometry
+}
+
+normalize_fragment_feature_bias <- function(bias, bias_name, feature) {
+  if (!is.list(bias) || is.null(bias$source) || length(bias$source) != 1L ||
+      !bias$source %in% c("none", "default", "user", "learned")) {
+    stop("fragment_geometry$", bias_name,
+         " must specify source none, default, user, or learned")
+  }
+  strength <- if (is.null(bias$strength)) 1 else bias$strength
+  if (!is.numeric(strength) || length(strength) != 1L ||
+      !is.finite(strength) || strength < 0) {
+    stop(bias_name, " strength must be one finite non-negative number")
+  }
+  if (bias$source %in% c("none", "default")) {
+    return(list(source = bias$source, table = NULL, strength = strength))
+  }
+  table <- data.table::copy(data.table::as.data.table(bias$table))
+  required <- c(feature, "fragment_length", "weight")
+  if (!all(required %in% names(table)) || !nrow(table)) {
+    stop(bias_name, " table requires columns: ", paste(required, collapse = ", "))
+  }
+  if (feature == "codon") {
+    table[, codon := toupper(as.character(codon))]
+    if (anyNA(table$codon) || any(!grepl("^[ACGT]{3}$", table$codon))) {
+      stop(bias_name, " codons must be three-base DNA strings")
+    }
+  } else {
+    if (anyNA(table$frame) || any(!table$frame %in% 0:2)) {
+      stop(bias_name, " frames must be 0, 1, or 2")
+    }
+    table[, frame := as.integer(frame)]
+  }
+  if (anyNA(table$fragment_length) ||
+      any(table$fragment_length <= 0 | !is.finite(table$fragment_length) |
+          table$fragment_length != as.integer(table$fragment_length)) ||
+      anyNA(table$weight) || any(!is.finite(table$weight) | table$weight <= 0)) {
+    stop(bias_name, " lengths and weights must be finite and positive")
+  }
+  table[, fragment_length := as.integer(fragment_length)]
+  if (anyDuplicated(table[, c(feature, "fragment_length"), with = FALSE])) {
+    stop(bias_name, " table contains duplicate feature/length rows")
+  }
+  list(source = bias$source, table = table[, c(feature, "fragment_length", "weight"), with = FALSE],
+       strength = strength)
+}
+
+fragment_feature_weight <- function(value, fragment_length, bias, feature) {
+  if (is.null(bias$table) || identical(bias$strength, 0)) return(1)
+  index <- bias$table[[feature]] == value &
+    bias$table$fragment_length == fragment_length
+  hit <- bias$table$weight[index]
+  if (!length(hit)) 1 else hit[[1L]] ^ bias$strength
 }
 
 validate_end_bias_table <- function(table, bias_name = "end bias") {
@@ -292,6 +352,15 @@ append_rnase_to_simulated_rpf_table <- function(dt_range, rnase_bias,
     )]
     prefix[, end := start]
     suffix[, end := start]
+    if ("region_position" %in% names(group)) {
+      prefix[, region_position := seq.int(
+        group$region_position[1L] - reach, group$region_position[1L] - 1L
+      )]
+      suffix[, region_position := seq.int(
+        group$region_position[nrow(group)] + 1L,
+        group$region_position[nrow(group)] + reach
+      )]
+    }
     data.table::rbindlist(list(prefix, group, suffix))
   }))
 }
@@ -340,6 +409,13 @@ transcript_fragment_alignment <- function(model, transcript_start,
 
 has_active_end_bias <- function(geometry) {
   any(vapply(geometry[c("five_prime_bias", "three_prime_bias")], function(bias) {
+    !is.null(bias$table) && bias$strength > 0
+  }, logical(1)))
+}
+
+has_active_fragment_bias <- function(geometry) {
+  bias_names <- c("five_prime_bias", "three_prime_bias", "codon_bias", "frame_bias")
+  any(vapply(geometry[bias_names], function(bias) {
     !is.null(bias$table) && bias$strength > 0
   }, logical(1)))
 }
@@ -422,18 +498,32 @@ make_simulated_rpf_fragments <- function(signal_table, transcript_models,
     valid[, sequence := vapply(seq_len(.N), function(j) {
       substr(model$sequence, tx_start[j], tx_end[j])
     }, character(1))]
-    valid[, bias_weight := vapply(seq_len(.N), function(j) {
+    valid[, codon := substr(model$sequence, site_tx, site_tx + 2L)]
+    frame <- if ("region_position" %in% names(row)) {
+      as.integer((row$region_position - 1L) %% 3L)
+    } else 0L
+    valid[, frame := frame]
+    valid[, end_bias_weight := vapply(seq_len(.N), function(j) {
       end_bias_weight(
         sequence[j],
         fragment_length[j], geometry$five_prime_bias, geometry$three_prime_bias
       )
     }, numeric(1))]
+    valid[, codon_bias_weight := vapply(seq_len(.N), function(j) {
+      fragment_feature_weight(codon[j], fragment_length[j],
+                              geometry$codon_bias, "codon")
+    }, numeric(1))]
+    valid[, frame_bias_weight := vapply(seq_len(.N), function(j) {
+      fragment_feature_weight(frame[j], fragment_length[j],
+                              geometry$frame_bias, "frame")
+    }, numeric(1))]
+    valid[, bias_weight := end_bias_weight * codon_bias_weight * frame_bias_weight]
     valid[, probability := probability / sum(probability)]
     valid[, geometry_probability := probability]
     valid
   })
   allocated <- allocate_fragment_candidates(
-    candidate_rows, signal_table, has_active_end_bias(geometry)
+    candidate_rows, signal_table, has_active_fragment_bias(geometry)
   )
   rows <- lapply(seq_len(nrow(signal_table)), function(i) {
     row <- signal_table[i]
@@ -469,9 +559,14 @@ make_simulated_rpf_fragments <- function(signal_table, transcript_models,
         site_reference = geometry$site_reference,
         geometry_probability = selected$geometry_probability[j],
         sequence = selected$sequence[j],
+        codon = selected$codon[j],
+        frame = selected$frame[j],
         five_prime_kmer = end_bias_kmer(selected$sequence[j], geometry$five_prime_bias),
         three_prime_kmer = end_bias_kmer(selected$sequence[j], geometry$three_prime_bias, TRUE),
-        end_bias_weight = selected$bias_weight[j],
+        end_bias_weight = selected$end_bias_weight[j],
+        codon_bias_weight = selected$codon_bias_weight[j],
+        frame_bias_weight = selected$frame_bias_weight[j],
+        fragment_bias_weight = selected$bias_weight[j],
         final_probability = selected$probability[j]
       )
     }))
@@ -501,7 +596,13 @@ simulated_rpf_alignments <- function(fragment_table, seqinfo) {
     site_offset = fragment_table$site_offset,
     site_reference = fragment_table$site_reference,
     geometry_probability = fragment_table$geometry_probability,
-    sequence = fragment_table$sequence
+    sequence = fragment_table$sequence,
+    codon = fragment_table$codon,
+    frame = fragment_table$frame,
+    end_bias_weight = fragment_table$end_bias_weight,
+    codon_bias_weight = fragment_table$codon_bias_weight,
+    frame_bias_weight = fragment_table$frame_bias_weight,
+    fragment_bias_weight = fragment_table$fragment_bias_weight
   )
 }
 
@@ -541,7 +642,9 @@ write_fragment_ground_truth <- function(fragment_table, file_base,
     "fragment_start", "fragment_end", "five_prime_end", "three_prime_end",
     "fragment_length", "site_offset", "site_reference", "geometry_probability",
     "strand", "cigar", "sequence", "score", "sampling_group",
-    "five_prime_kmer", "three_prime_kmer", "end_bias_weight", "final_probability"
+    "codon", "frame", "five_prime_kmer", "three_prime_kmer",
+    "end_bias_weight", "codon_bias_weight", "frame_bias_weight",
+    "fragment_bias_weight", "final_probability"
   )
   data.table::fwrite(fragment_table[, ..columns], path, sep = "\t")
   path

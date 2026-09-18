@@ -159,3 +159,63 @@ test_that("end profile normalization is repeatable and does not mutate input", {
   expect_equal(normalize_fragment_geometry(geometry)$five_prime_bias,
                geometry$five_prime_bias)
 })
+
+test_that("length-specific codon and frame profiles select physical fragments", {
+  fixture <- end_selection_fixture()
+  substr(fixture$models$tx$sequence, 30L, 32L) <- "AAA"
+  substr(fixture$models$tx$sequence, 60L, 62L) <- "CCC"
+  fixture$signal[, `:=`(region_position = c(1L, 2L),
+                        sampling_group = "cds", read_count = 100000L)]
+  distribution <- data.frame(
+    fragment_length = c(8L, 9L), site_offset = c(2L, 3L), probability = c(.5, .5)
+  )
+  geometry <- list(
+    source = "user", distribution = distribution,
+    codon_bias = list(source = "user", table = data.table::data.table(
+      codon = rep(c("AAA", "CCC"), 2),
+      fragment_length = rep(c(8L, 9L), each = 2),
+      weight = c(4, 1, 1, 4)
+    ))
+  )
+  set.seed(601)
+  codon_result <- make_simulated_rpf_fragments(
+    fixture$signal, fixture$models, 8:9, geometry
+  )
+  expect_equal(codon_result[fragment_length == 8 & codon == "AAA", sum(score)] /
+                 codon_result[fragment_length == 8, sum(score)], 0.8,
+               tolerance = 0.015)
+  expect_equal(codon_result[fragment_length == 9 & codon == "AAA", sum(score)] /
+                 codon_result[fragment_length == 9, sum(score)], 0.2,
+               tolerance = 0.03)
+  expect_equal(sum(codon_result$score), 100000)
+
+  geometry$codon_bias <- list(source = "none")
+  geometry$frame_bias <- list(source = "user", table = data.table::data.table(
+    frame = rep(0:1, 2), fragment_length = rep(c(8L, 9L), each = 2),
+    weight = c(4, 1, 1, 4)
+  ))
+  set.seed(602)
+  frame_result <- make_simulated_rpf_fragments(
+    fixture$signal, fixture$models, 8:9, geometry
+  )
+  expect_equal(frame_result[fragment_length == 8 & frame == 0, sum(score)] /
+                 frame_result[fragment_length == 8, sum(score)], 0.8,
+               tolerance = 0.015)
+  expect_equal(frame_result[fragment_length == 9 & frame == 0, sum(score)] /
+                 frame_result[fragment_length == 9, sum(score)], 0.2,
+               tolerance = 0.03)
+  expect_equal(sum(frame_result$score), 100000)
+})
+
+test_that("length-specific feature tables reject invalid rows", {
+  expect_error(normalize_fragment_geometry(list(codon_bias = list(
+    source = "user", table = data.frame(
+      codon = "AXA", fragment_length = 28L, weight = 1
+    )
+  ))), "codons")
+  expect_error(normalize_fragment_geometry(list(frame_bias = list(
+    source = "user", table = data.frame(
+      frame = 3L, fragment_length = 28L, weight = 1
+    )
+  ))), "frames")
+})

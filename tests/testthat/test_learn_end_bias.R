@@ -63,6 +63,12 @@ test_that("length-specific preferences are learned separately", {
   fit <- fit_learning_fixture(fixture, bam, by_length = TRUE)
   expect_equal(relative_end_weight(fit$five_prime_bias, "G"), c(4, .5), tolerance = .12)
   expect_setequal(fit$five_prime_bias$table$fragment_length, c(28L, 29L))
+  expect_equal(fit$codon_bias$source, "learned")
+  expect_setequal(fit$codon_bias$table$fragment_length, c(28L, 29L))
+  expect_equal(fit$frame_bias$source, "learned")
+  expect_setequal(fit$frame_bias$table$fragment_length, c(28L, 29L))
+  expect_true(all(fit$diagnostics$frame_counts[frame == 0, weight] >
+                  fit$diagnostics$frame_counts[frame != 0, weight]))
 })
 
 test_that("ambiguous annotations are excluded and geometry must be explicit", {

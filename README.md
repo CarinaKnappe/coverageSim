@@ -82,18 +82,15 @@ devtools::load_all(".")
 transcripts <- ORFik::loadRegion(real_txdb, "mrna")
 cds <- ORFik::loadRegion(real_txdb, "cds", names.keep = names(transcripts))
 
-# Replace these example offsets with offsets appropriate for the input library.
-geometry <- list(
-  source = "user", site_reference = "a_site",
-  distribution = data.frame(
-    fragment_length = c(28L, 29L),
-    site_offset = c(15L, 16L), probability = c(0.5, 0.5)
-  )
+# Learn supported lengths, their empirical probabilities and one A-site offset
+# per length from frame evidence in the same BAM.
+geometry <- learn_fragment_geometry(
+  bam = "real_sample.bam", transcripts = transcripts, cds = cds
 )
 learned <- learn_end_bias(
   bam = "real_sample.bam", fasta = "matching_reference.fa",
   transcripts = transcripts, cds = cds,
-  fragment_geometry = geometry, k = 1, by_length = FALSE
+  fragment_geometry = geometry, k = 1, by_length = TRUE
 )
 saveRDS(learned, "learned_end_bias.rds")
 
@@ -102,6 +99,8 @@ saveRDS(learned, "learned_end_bias.rds")
 simulation_geometry <- list(source = "default", site_reference = "a_site")
 simulation_geometry$five_prime_bias <- learned$five_prime_bias
 simulation_geometry$three_prime_bias <- learned$three_prime_bias
+simulation_geometry$codon_bias <- learned$codon_bias
+simulation_geometry$frame_bias <- learned$frame_bias
 simulation_geometry$five_prime_bias$strength <- 0.5
 simulation_geometry$three_prime_bias$strength <- 1
 simNGScoverage(
@@ -116,7 +115,7 @@ The fit compares observed reads with possible CDS fragments, including positions
 with zero reads. It jointly estimates both end effects and nuisance codon effects,
 conditioning on transcript-by-length totals. A positive ridge penalty stabilizes
 sparse motifs. `k = 2` or `k = 3` allows longer motifs; `by_length = TRUE` estimates
-separate profiles per supported length. Missing length/motif combinations in a
+separate end, codon and frame profiles per supported length. Missing length/motif combinations in a
 profile retain the simulator's neutral fallback. The fitted codon effects are
 returned as `learned$sequence_bias`. This table also stores the robustly estimated
 Dirichlet-multinomial concentration. When it is passed as `seq_bias`, the default
@@ -126,14 +125,14 @@ learned value fall back to `1`.
 
 Inspect `learned$diagnostics` for used/excluded read counts, motif support and fit
 convergence. The BAM is read in chunks, retaining counts per distinct alignment.
-This first learner requires one supplied offset per length and complete CDS
+The end learner requires one supplied or learned offset per length and complete CDS
 annotations. It excludes clips, indels, paired reads, low-quality/secondary/
 supplementary mappings, NH>1, ambiguous transcript assignments, and reads whose
 assigned site is not at a CDS codon boundary. Duplicate flags alone are retained.
 It estimates transferable sequence preferences under these assumptions, rather
 than identifying an enzyme-specific effect or providing confidence intervals.
-Length probabilities, frame noise and region proportions are not learned by this
-function. Coverage roughness is estimated from transcript-level overdispersion
+Length probabilities and offsets come from `learn_fragment_geometry()`; region
+proportions come from `learn_region_proportions()`. Coverage roughness is estimated from transcript-level overdispersion
 after accounting for fitted codon and end preferences. Strong position-specific
 biological effects or unmodelled mapping biases can still affect the estimate.
 The fit also returns a non-negative codon autocorrelation kernel and auditable

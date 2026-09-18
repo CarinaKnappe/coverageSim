@@ -275,6 +275,7 @@ sequence_table_controller <- function() {
       tile_groups <- groupings(tile)
       transcript_ids <- txNames(region_ranges)
       dt_range[, transcript_id := transcript_ids[tile_groups]]
+      dt_range[, region_position := seq_len(.N), by = tile_groups]
       alpha_matrix <- NULL
       add_sequence_bias <- region %in% c("cds", "uorf") & !is.null(seq_bias)
       if (unlist(sampling[[region]])[1] == "DMN") {
