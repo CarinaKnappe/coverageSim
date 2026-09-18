@@ -559,6 +559,19 @@ make_simulated_rpf_fragments <- function(signal_table, transcript_models,
         site_reference = geometry$site_reference,
         geometry_probability = selected$geometry_probability[j],
         sequence = selected$sequence[j],
+        # `sequence` is transcript-oriented (5'->3' of the mRNA), matching the
+        # biological fragment/read direction; it is what codon/end-motif
+        # biases and the ground-truth table use. SAM/BAM SEQ must instead be
+        # reported relative to the reference (genome plus-strand), so for
+        # minus-strand fragments we store the reverse complement separately
+        # here rather than reusing `sequence` when writing alignments.
+        reference_sequence = if (model$strand == "+") {
+          selected$sequence[j]
+        } else {
+          as.character(Biostrings::reverseComplement(
+            Biostrings::DNAString(selected$sequence[j])
+          ))
+        },
         codon = selected$codon[j],
         frame = selected$frame[j],
         five_prime_kmer = end_bias_kmer(selected$sequence[j], geometry$five_prime_bias),
@@ -597,6 +610,7 @@ simulated_rpf_alignments <- function(fragment_table, seqinfo) {
     site_reference = fragment_table$site_reference,
     geometry_probability = fragment_table$geometry_probability,
     sequence = fragment_table$sequence,
+    reference_sequence = fragment_table$reference_sequence,
     codon = fragment_table$codon,
     frame = fragment_table$frame,
     end_bias_weight = fragment_table$end_bias_weight,

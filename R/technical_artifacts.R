@@ -120,7 +120,7 @@ write_artifact_sam <- function(records, path, seqinfo) {
   )
   lines <- paste(
     records$qname, records$flag, records$seqnames, records$start,
-    records$mapq, records$cigar, "*", 0L, 0L, records$sequence, "*",
+    records$mapq, records$cigar, "*", 0L, 0L, records$reference_sequence, "*",
     paste0("NH:i:", records$nh), sep = "\t"
   )
   writeLines(c(header, lines), path)

@@ -20,7 +20,12 @@ samFromGAlignment <- function(x, path, seqinfo = GenomeInfoDb::seqinfo(x),
   if (is(x, "GRanges")) x <- GAlignments(seqnames = seqnames(x), pos = start(x),
                                          cigar = paste0(readWidths(x),"M"), strand = strand(x),
                                          score = mcols(x)$score)
-  if (identical(sequences, "*") && !is.null(S4Vectors::mcols(x)$sequence)) {
+  if (identical(sequences, "*") && !is.null(S4Vectors::mcols(x)$reference_sequence)) {
+    # Reference/genome-plus-strand-oriented sequence (see fragment_geometry.R),
+    # already reverse-complemented for minus-strand alignments where needed.
+    # Preferred over `sequence` (transcript-oriented) whenever present.
+    sequences <- as.character(S4Vectors::mcols(x)$reference_sequence)
+  } else if (identical(sequences, "*") && !is.null(S4Vectors::mcols(x)$sequence)) {
     sequences <- as.character(S4Vectors::mcols(x)$sequence)
   }
   chr_header <- paste("@SQ", paste0("SN:", seqnames(seqinfo)),

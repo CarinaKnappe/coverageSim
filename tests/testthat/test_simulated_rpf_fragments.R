@@ -67,6 +67,21 @@ test_that("simulated RPFs preserve site geometry, sequence, and strand", {
     substr(model$sequence, site_tx - 2L, site_tx + 5L)
   }, character(1))
   expect_equal(fragments$sequence, unname(expected))
+
+  # reference_sequence is what must be written to SAM/BAM SEQ: identical to
+  # the transcript-oriented `sequence` on the plus strand, and its reverse
+  # complement on the minus strand (SAM always reports SEQ relative to the
+  # reference/plus strand, regardless of the alignment's FLAG).
+  expect_equal(
+    fragments$reference_sequence[fragments$strand == "+"],
+    fragments$sequence[fragments$strand == "+"]
+  )
+  expect_equal(
+    fragments$reference_sequence[fragments$strand == "-"],
+    as.character(Biostrings::reverseComplement(
+      Biostrings::DNAStringSet(fragments$sequence[fragments$strand == "-"])
+    ))
+  )
 })
 
 test_that("OFST and BAM represent the same simulated RPFs", {
@@ -103,7 +118,10 @@ test_that("OFST and BAM represent the same simulated RPFs", {
   expect_equal(length(scanned$pos), sum(fragments$score))
   expect_equal(unique(scanned$cigar), fragments$cigar)
   expect_true(all(Biostrings::width(scanned$seq) == 8L))
-  expect_setequal(as.character(scanned$seq), fragments$sequence)
+  # The BAM SEQ field is always relative to the reference (plus) strand, so
+  # it must match `reference_sequence`, not the transcript-oriented
+  # `sequence` (they differ for the minus-strand fragment in this fixture).
+  expect_setequal(as.character(scanned$seq), fragments$reference_sequence)
 })
 
 test_that("legacy point export keeps the signal as alignment start", {
