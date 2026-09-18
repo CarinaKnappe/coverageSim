@@ -14,7 +14,11 @@ test_that("Git excludes local analysis material but retains simulator sources", 
     "tests/testthat/test_rust_helpers_separation.R",
     "tests/testthat/test_deprecated_dataset_layout.R",
     "tests/tests_and_demos/Parameter_settings_per_run.ods",
-    "tests/tests_and_demos/learn_from_HumanGenome.R"
+    "tests/tests_and_demos/learn_from_HumanGenome.R",
+    "test_human.2bit",
+    "test_human.2bit_Human.test_seed",
+    "test_human.gtf",
+    "BSgenome.Human.test.genc2522M/inst/extdata/single_sequences.2bit"
   )
   included <- c(
     "R/Sim_reads_from_counts.R", "R/fragment_geometry.R",
