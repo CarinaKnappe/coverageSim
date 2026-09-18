@@ -96,6 +96,13 @@
 #' learned with `learn_end_bias(by_length = TRUE)`.
 #' @param ground_truth FALSE, TRUE, or a directory path. In simulated-RPF mode, TRUE
 #' writes one compressed fragment truth table next to each simulated library.
+#' @param technical_artifacts Optional list controlling alignment artifacts in
+#' simulated RPF SAM/BAM output: duplication_rate and multimapping_rate default
+#' to zero; duplicate_copies and secondary_alignments default to one. Active
+#' artifacts require RFP output format sam or bam. Extra PCR copies carry flag
+#' 0x400; alternate alignments share the primary QNAME and carry flag 0x100 and
+#' an NH tag greater than one. Biological fragment counts remain in the regular
+#' ground truth; the expanded artifact truth is written separately.
 #' @param debug_coverage logical, default FALSE. If TRUE, debug steps of coverage calculation,
 #' for parameter errors or just to understand how it all works.
 #' @return an \code{\link[ORFik]{experiment}}
@@ -149,9 +156,20 @@ simNGScoverage <- function(simGenome,
                              codon_bias = list(source = "none"),
                              frame_bias = list(source = "none")
                            ),
+                           technical_artifacts = NULL,
                            ground_truth = FALSE,
                            debug_coverage = FALSE) {
   fragment_mode <- match.arg(fragment_mode)
+  technical_artifacts <- normalize_technical_artifacts(technical_artifacts)
+  if (has_active_technical_artifacts(technical_artifacts)) {
+    if (fragment_mode != "simulated_rpf") {
+      stop("Active technical_artifacts require fragment_mode = 'simulated_rpf'")
+    }
+    artifact_format <- resolve_export_format(libFormats, "RFP")
+    if (!artifact_format %in% c("sam", "bam")) {
+      stop("Active technical_artifacts require RFP output format 'sam' or 'bam'")
+    }
+  }
   validate_sequence_profile(seq_bias)
   dmn_alpha_scale <- resolve_dmn_alpha_scale(dmn_alpha_scale, seq_bias)
   if (fragment_mode == "physical") {
@@ -255,12 +273,28 @@ simNGScoverage <- function(simGenome,
     } else if (!identical(ground_truth, FALSE) && !is.null(ground_truth)) {
       warning("Ground truth is currently written only for simulated RPF libraries")
     }
-    written_files <- write_simulated_library(
-      gr_final,
-      file_base = file_base,
-      format = format,
-      seqinfo = GenomeInfoDb::seqinfo(gr_final)
-    )
+    artifact_output <- simulated_rpf &&
+      has_active_technical_artifacts(technical_artifacts)
+    if (artifact_output && !format %in% c("sam", "bam")) {
+      stop("Active technical_artifacts require RFP output format 'sam' or 'bam'")
+    }
+    written_files <- if (artifact_output) {
+      artifact_records <- simulate_alignment_artifacts(
+        fragment_table, technical_artifacts
+      )
+      write_artifact_ground_truth(
+        artifact_records, file_base, ground_truth
+      )
+      write_artifact_library(
+        artifact_records, file_base, format,
+        GenomeInfoDb::seqinfo(gr_final)
+      )
+    } else {
+      write_simulated_library(
+        gr_final, file_base = file_base, format = format,
+        seqinfo = GenomeInfoDb::seqinfo(gr_final)
+      )
+    }
     files <- c(files, unname(written_files["default"]))
   }
   replicates <- as.character(colData(count_table)$replicate)

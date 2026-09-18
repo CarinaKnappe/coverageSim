@@ -53,17 +53,6 @@ test_that("synthetic end bias changes fragment selection while preserving counts
   expect_true(all(fragments$end_bias_weight[fragments$site_offset == candidates$site_offset[1]] == 20))
 })
 
-end_selection_fixture <- function() {
-  sequence <- paste(rep("A", 90), collapse = "")
-  substr(sequence, 28, 28) <- "G"
-  substr(sequence, 35, 35) <- "C"
-  model <- list(transcript_id = "tx", exons = GenomicRanges::GRanges(
-    "chr1", IRanges::IRanges(1, 90), "+", exon_rank = 1L),
-    cumulative_start = 1L, length = 90L, strand = "+", sequence = sequence)
-  list(models = list(tx = model), signal = data.table::data.table(
-    transcript_id = "tx", signal_position = c(30L, 60L), score = c(50000L, 50000L)))
-}
-
 run_end_selection <- function(fixture, five = 1, three = 0, distribution = NULL) {
   make_simulated_rpf_fragments(fixture$signal, fixture$models, 8L, list(
     source = "user", site_offset = if (is.null(distribution)) 2L else NULL,

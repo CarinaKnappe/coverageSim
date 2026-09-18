@@ -162,3 +162,40 @@ overlapping regions are assigned by the documented `uorf`, `cds`, `leader`,
 `trailer` priority by default; fractional allocation and exclusion are also
 available. The fit reports both global simulator-ready proportions and
 per-transcript estimates, with a configurable pseudocount for sparse regions.
+
+Alignment artifacts are an optional final layer for SAM/BAM benchmarks. Clean
+output remains the default. For example:
+
+```r
+simNGScoverage(
+  simGenome = simulated_genome,
+  count_table = simulated_region_counts,
+  libFormats = list(RFP = "bam"),
+  technical_artifacts = list(
+    duplication_rate = 0.1,
+    duplicate_copies = 1,
+    multimapping_rate = 0.05,
+    secondary_alignments = 1
+  )
+)
+```
+
+PCR copies are additional records marked with SAM flag `0x400`. Multimapping
+adds alternate records with the same QNAME, flag `0x100`, and a matching `NH`
+tag. These records increase the alignment count but do not alter the biological
+fragment budget recorded in the regular ground truth. With ground truth enabled,
+an additional artifact table links every added record to its source molecule.
+
+## Development-plan status
+
+The six items from the local bias-overview workbook now map to package behavior
+as follows:
+
+1. The default sequence profile is the motif-wise median of R1--R10.
+2. Separate 5-prime and 3-prime end preferences can be supplied or learned.
+3. DMN roughness, residual codon autocorrelation and spike/gap QC are learned.
+4. Leader/CDS/trailer/uORF proportions are learned with explicit overlap rules.
+5. Length probabilities, offsets, end, codon and frame profiles can be learned
+   and used separately for each supported fragment length.
+6. PCR duplication and secondary/NH multimapping records are optional; their
+   rates remain zero by default.

@@ -5,6 +5,8 @@
 
 # Local reference material and presentation files; never commit this directory.
 /git_ignore/
+/CoverageSim_manuscript.pdf
+/CoverageSim_manuscript_additional_file_1.pdf
 
 *.2bit
 *.gtf

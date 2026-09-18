@@ -35,6 +35,7 @@ simNGScoverage(
     NULL, boundary_action = "renormalize", five_prime_bias = list(source = "none"),
     three_prime_bias = list(source = "none"), codon_bias = list(source = "none"),
     frame_bias = list(source = "none")),
+  technical_artifacts = NULL,
   ground_truth = FALSE,
   debug_coverage = FALSE
 )
@@ -148,6 +149,14 @@ learned with `learn_end_bias(by_length = TRUE)`.}
 
 \item{ground_truth}{FALSE, TRUE, or a directory path. In simulated-RPF mode, TRUE
 writes one compressed fragment truth table next to each simulated library.}
+
+\item{technical_artifacts}{Optional list controlling alignment artifacts in
+simulated RPF SAM/BAM output: duplication_rate and multimapping_rate default
+to zero; duplicate_copies and secondary_alignments default to one. Active
+artifacts require RFP output format sam or bam. Extra PCR copies carry flag
+0x400; alternate alignments share the primary QNAME and carry flag 0x100 and
+an NH tag greater than one. Biological fragment counts remain in the regular
+ground truth; the expanded artifact truth is written separately.}
 
 \item{debug_coverage}{logical, default FALSE. If TRUE, debug steps of coverage calculation,
 for parameter errors or just to understand how it all works.}

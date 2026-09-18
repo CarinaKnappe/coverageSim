@@ -330,6 +330,34 @@ test_that("simNGScoverage writes BAM output through the format-specific writer",
   expect_gt(length(Rsamtools::scanBam(bam_path)[[1]]$pos), 0)
 })
 
+test_that("simNGScoverage writes optional PCR duplicates as flagged BAM records", {
+  set.seed(705)
+  fixture <- make_simulation_fixture(max_uorfs = 0, regions = "cds")
+  for (assay_name in c("gene", "cds")) {
+    SummarizedExperiment::assay(
+      fixture$region_count_table, assay_name
+    )[, 1] <- 100L
+  }
+  truth_dir <- tempfile("artifact-truth-")
+  experiment <- run_simulated_experiment(
+    fixture, seq_bias = NULL, rnase_bias = list(RFP = NULL),
+    auto_correlation = NULL, lib_formats = list(RFP = "bam"),
+    ground_truth = truth_dir,
+    technical_artifacts = list(duplication_rate = 1, duplicate_copies = 1L)
+  )
+  bam <- ORFik::filepath(experiment, "default")[[1]]
+  raw <- Rsamtools::scanBam(
+    bam, param = Rsamtools::ScanBamParam(what = "flag")
+  )[[1]]
+  expect_length(raw$flag, 1200)
+  expect_equal(sum(bitwAnd(raw$flag, 1024L) != 0L), 600)
+  artifact_truth <- list.files(truth_dir, pattern = "artifact_truth", full.names = TRUE)
+  expect_length(artifact_truth, 1)
+  truth <- data.table::fread(artifact_truth)
+  expect_equal(sum(truth$is_duplicate), 600)
+  expect_equal(sum(truth$is_secondary), 0)
+})
+
 test_that("active end selection runs through MN and DMN with conserved transcript counts", {
   set.seed(71)
   fixture <- make_simulation_fixture(max_uorfs = 0, regions = "cds")
