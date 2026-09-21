@@ -10,6 +10,7 @@ Simulation project for ribo-seq coverage analysis.
 
 ## General workflow
 - First, catch up on the latest local changes and understand the repository.
+- Check the git-ignored `.agents/` folder for an `onboarding.md` file and read it first if it exists.
 - Always inspect related code before making assumptions or edits.
 - If necessary, follow dependencies deeper (e.g. ORFik / Bioconductor) before making changes.
 
