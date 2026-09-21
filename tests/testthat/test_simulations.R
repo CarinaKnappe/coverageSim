@@ -430,6 +430,129 @@ test_that("dmn_alpha_scale controls positional roughness without changing read t
   expect_equal(automatic, explicit)
 })
 
+test_that("dmn_family/dmn_gdm_scale/dmn_zero_inflation default to the legacy DMN sampling", {
+  fixture <- make_simulation_fixture(max_uorfs = 0, regions = "cds")
+  common_args <- list(
+    fixture = fixture,
+    fragment_mode = "legacy_point",
+    ideal_coverage = list(cds = list(RFP = quote(rep(1, x)))),
+    rnase_bias = list(RFP = NULL),
+    auto_correlation = NULL,
+    sampling = list(cds = list(RFP = "DMN"))
+  )
+
+  set.seed(722)
+  legacy <- do.call(run_simulated_experiment, common_args)
+  set.seed(722)
+  explicit_defaults <- do.call(run_simulated_experiment, c(common_args, list(
+    dmn_family = "dirichlet", dmn_gdm_scale = 1, dmn_zero_inflation = 0
+  )))
+
+  legacy_reads <- ORFik::fimport(ORFik::filepath(legacy, "default")[1])
+  explicit_reads <- ORFik::fimport(ORFik::filepath(explicit_defaults, "default")[1])
+  expect_equal(S4Vectors::mcols(legacy_reads)$score, S4Vectors::mcols(explicit_reads)$score)
+  expect_equal(GenomicRanges::start(legacy_reads), GenomicRanges::start(explicit_reads))
+})
+
+test_that("dmn_zero_inflation concentrates reads onto fewer positions without changing read totals", {
+  fixture <- make_simulation_fixture(max_uorfs = 0, regions = "cds")
+  for (assay_name in c("gene", "cds")) {
+    SummarizedExperiment::assay(
+      fixture$region_count_table, assay_name
+    )[, 1] <- 10000L
+  }
+  run_zi <- function(zero_inflation) {
+    set.seed(723)
+    experiment <- run_simulated_experiment(
+      fixture,
+      fragment_mode = "legacy_point",
+      ideal_coverage = list(cds = list(RFP = quote(rep(1, x)))),
+      rnase_bias = list(RFP = NULL),
+      auto_correlation = NULL,
+      sampling = list(cds = list(RFP = "DMN")),
+      dmn_zero_inflation = zero_inflation
+    )
+    reads <- ORFik::fimport(ORFik::filepath(experiment, "default")[1])
+    data.table::data.table(
+      seqnames = as.character(GenomicRanges::seqnames(reads)),
+      score = S4Vectors::mcols(reads)$score
+    )[, .(total = sum(score), occupied_positions = .N), by = seqnames]
+  }
+
+  off <- run_zi(0)
+  on <- run_zi(0.9)
+  expect_equal(sum(off$total), 60000)
+  expect_equal(sum(on$total), 60000)
+  expect_lt(stats::median(on$occupied_positions), stats::median(off$occupied_positions))
+
+  for (invalid in list(-0.1, 1, NA_real_, Inf, "0.5")) {
+    expect_error(
+      run_simulated_experiment(fixture, fragment_mode = "legacy_point",
+                               dmn_zero_inflation = invalid),
+      "dmn_zero_inflation"
+    )
+  }
+})
+
+test_that("dmn_family = 'generalized' runs end-to-end and preserves read totals", {
+  fixture <- make_simulation_fixture(max_uorfs = 0, regions = "cds")
+  set.seed(724)
+  experiment <- run_simulated_experiment(
+    fixture,
+    fragment_mode = "legacy_point",
+    ideal_coverage = list(cds = list(RFP = quote(rep(1, x)))),
+    rnase_bias = list(RFP = NULL),
+    auto_correlation = NULL,
+    sampling = list(cds = list(RFP = "DMN")),
+    dmn_family = "generalized",
+    dmn_gdm_scale = 1.5
+  )
+  reads <- ORFik::fimport(ORFik::filepath(experiment, "default")[1])
+  expect_equal(sum(S4Vectors::mcols(reads)$score),
+              sum(SummarizedExperiment::assay(fixture$region_count_table, "cds")[, 1]))
+
+  for (invalid in list(0, -1, NA_real_, Inf, "1")) {
+    expect_error(
+      run_simulated_experiment(fixture, fragment_mode = "legacy_point",
+                               dmn_family = "generalized", dmn_gdm_scale = invalid),
+      "dmn_gdm_scale"
+    )
+  }
+  expect_error(
+    run_simulated_experiment(fixture, fragment_mode = "legacy_point",
+                             dmn_family = "not_a_family")
+  )
+})
+
+test_that("dmn_zero_inflation/dmn_family also apply on the deferred simulated-RPF fragment-geometry path", {
+  set.seed(73)
+  fixture <- make_simulation_fixture(max_uorfs = 0, regions = "cds")
+  expected <- SummarizedExperiment::assay(fixture$region_count_table, "cds")[, 1]
+  fragment_geometry <- list(source = "user", site_offset = 15L,
+    five_prime_bias = list(source = "user", strength = 1,
+      table = make_synthetic_end_bias(enriched_weight = 4)))
+
+  for (zigdm_args in list(
+    list(dmn_zero_inflation = 0.6),
+    list(dmn_family = "generalized", dmn_gdm_scale = 1.5),
+    list(dmn_family = "generalized", dmn_gdm_scale = 1.5, dmn_zero_inflation = 0.4)
+  )) {
+    truth_dir <- tempfile("zigdm-deferred-truth-")
+    experiment <- do.call(run_simulated_experiment, c(
+      list(fixture = fixture, rnase_bias = list(RFP = NULL), auto_correlation = NULL,
+          sampling = list(cds = list(RFP = "DMN")), read_lengths_per = list(RFP = 28L),
+          ground_truth = truth_dir, fragment_geometry = fragment_geometry),
+      zigdm_args
+    ))
+    truth <- data.table::fread(list.files(truth_dir, full.names = TRUE)[1])
+    observed <- truth[, .(count = sum(score)), by = transcript_id]
+    expect_equal(observed$count[match(names(expected), observed$transcript_id)],
+                unname(expected))
+    imported <- ORFik::fimport(ORFik::filepath(experiment, "default")[1])
+    expect_equal(sum(S4Vectors::mcols(imported)$score), sum(expected))
+  }
+})
+
 test_that("shuffled input counts remain attached to their transcript identifiers", {
   set.seed(911)
   fixture <- make_simulation_fixture(max_uorfs = 0, regions = "cds", seqnames = "chr1")

@@ -105,6 +105,27 @@
 #' ground truth; the expanded artifact truth is written separately.
 #' @param debug_coverage logical, default FALSE. If TRUE, debug steps of coverage calculation,
 #' for parameter errors or just to understand how it all works.
+#' @param dmn_family "dirichlet" (default) or "generalized". Selects the
+#' distribution family used for Step-4 DMN sampling, see \code{rgdirmnom()}.
+#' At the default, sampling is byte-for-byte identical to always calling
+#' \code{extraDistr::rdirmnom()} directly (no behavior change). Applies to
+#' regions using \code{sampling = "DMN"}, including libraries with an active
+#' \code{fragment_geometry} bias under \code{fragment_mode = "simulated_rpf"}
+#' (those draw latent site probabilities via \code{draw_site_probabilities()}
+#' rather than integer counts via \code{rgdirmnom()} directly, but use the
+#' same family/scale/zero-inflation logic).
+#' @param dmn_gdm_scale positive numeric, default 1 (the standard Dirichlet
+#' distribution; same distribution as \code{dmn_family = "dirichlet"}, but
+#' not the same random numbers for a given seed). Only used when
+#' \code{dmn_family = "generalized"} (but always validated); see
+#' \code{rgdirmnom()}. Unlike
+#' \code{dmn_alpha_scale}, values away from 1 also shift the expected
+#' per-position coverage slightly, not only its variance -- see the Details
+#' section of \code{rgdirmnom()}.
+#' @param dmn_zero_inflation numeric in [0, 1), default 0 (off). Probability
+#' that an eligible Step-4 position is forced to a structural zero for a
+#' given simulated library, layered on top of the usual DMN sampling; see
+#' \code{rgdirmnom()}. Preserves the total read count per transcript region.
 #' @return an \code{\link[ORFik]{experiment}}
 #' @import ORFik data.table GenomicRanges
 #' @export
@@ -158,7 +179,10 @@ simNGScoverage <- function(simGenome,
                            ),
                            technical_artifacts = NULL,
                            ground_truth = FALSE,
-                           debug_coverage = FALSE) {
+                           debug_coverage = FALSE,
+                           dmn_family = c("dirichlet", "generalized"),
+                           dmn_gdm_scale = 1,
+                           dmn_zero_inflation = 0) {
   fragment_mode <- match.arg(fragment_mode)
   technical_artifacts <- normalize_technical_artifacts(technical_artifacts)
   if (has_active_technical_artifacts(technical_artifacts)) {
@@ -172,6 +196,9 @@ simNGScoverage <- function(simGenome,
   }
   validate_sequence_profile(seq_bias)
   dmn_alpha_scale <- resolve_dmn_alpha_scale(dmn_alpha_scale, seq_bias)
+  dmn_family <- match.arg(dmn_family)
+  validate_dmn_gdm_scale(dmn_gdm_scale)
+  validate_dmn_zero_inflation(dmn_zero_inflation)
   if (fragment_mode == "physical") {
     warning("fragment_mode = 'physical' is deprecated; use 'simulated_rpf'")
     fragment_mode <- "simulated_rpf"
@@ -236,6 +263,7 @@ simNGScoverage <- function(simGenome,
                                         uorf_ranges, uorf_prop_mode,
                                         uorf_prop_within_gene, sampling,
                                         dmn_alpha_scale,
+                                        dmn_family, dmn_gdm_scale, dmn_zero_inflation,
                                         debug_coverage, env = environment(),
                                         defer_counts = defer_counts)
     # Verify all reads have been distributed correctly
@@ -325,6 +353,7 @@ nt_coverage_all_regions <- function(count_table_regions, libClass,
                                     read_lengths_per, uorf_ranges,
                                     uorf_prop_mode, uorf_prop_within_gene,
                                     sampling, dmn_alpha_scale,
+                                    dmn_family, dmn_gdm_scale, dmn_zero_inflation,
                                     debug_coverage, env, defer_counts = FALSE) {
   regionsToSample <- assayNames(count_table_regions)[-1]
   data.table::rbindlist(lapply(regionsToSample, function(region) {
@@ -359,16 +388,25 @@ nt_coverage_all_regions <- function(count_table_regions, libClass,
         res <- scale_dmn_alpha(res, dmn_alpha_scale)
         sampled_lengths <- lengths(res)
         if (defer_counts) {
+          # draw_site_probabilities() draws latent site probabilities
+          # directly (for downstream physical-fragment selection in
+          # make_simulated_rpf_fragments()), not integer counts via
+          # rgdirmnom() -- but it applies the same
+          # family/gdm_scale/zero_inflation logic internally.
           sample <- unlist(lapply(seq_along(res), function(i) {
-            draw_site_probabilities(res[[i]], dirichlet = TRUE) * region_counts[i]
+            draw_site_probabilities(res[[i]], dirichlet = TRUE,
+                                    family = dmn_family, gdm_scale = dmn_gdm_scale,
+                                    zero_inflation = dmn_zero_inflation) * region_counts[i]
           }), use.names = FALSE)
         } else {
           res_lengths <- lengths(res)
           res_matrix <- pack_alpha_rows(res, region_length_matrix)
           #i <- 3; 57- sum(alpha_mat_3[i,] == 1e-24); lengths[i]
           n_genes <- length(res)
-          sample <- extraDistr::rdirmnom(n = n_genes, size = region_counts,
-                                         alpha = res_matrix)
+          sample <- rgdirmnom(n = n_genes, size = region_counts,
+                              alpha = res_matrix, family = dmn_family,
+                              gdm_scale = dmn_gdm_scale,
+                              zero_inflation = dmn_zero_inflation)
           sample <- flatten_sample_rows(sample, res_lengths)
         }
       } else { #MN
@@ -409,12 +447,26 @@ nt_coverage_all_regions <- function(count_table_regions, libClass,
 # overlaps <- overlaps[!duplicated(from(overlaps))]
 # x_ir <- IRanges(start=start(RFP), width = readWidths(RFP), names = seq(length(RFP)))
 
-# Draw the latent DMN probabilities before applying technical library selection.
-draw_site_probabilities <- function(weights, dirichlet = FALSE) {
+# Draw the latent DMN probabilities before applying technical library
+# selection. family/gdm_scale/zero_inflation mirror rgdirmnom()'s own
+# parameters (see ZIGDM.R) -- at their defaults this function is unchanged
+# from before ZIGDM: zero_inflation = 0 skips the masking step entirely, and
+# family = "dirichlet" keeps using the original Gamma-augmentation draw
+# below rather than rgdirichlet_generalized().
+draw_site_probabilities <- function(weights, dirichlet = FALSE,
+                                    family = c("dirichlet", "generalized"),
+                                    gdm_scale = 1, zero_inflation = 0) {
+  family <- match.arg(family)
   if (any(!is.finite(weights) | weights < 0) || !any(weights > 0)) {
     stop("Site weights must be finite, non-negative and not all zero")
   }
   if (dirichlet) {
+    if (zero_inflation > 0) {
+      weights <- apply_zero_inflation_mask_vector(weights, zero_inflation)
+    }
+    if (family == "generalized") {
+      return(rgdirichlet_generalized(weights, gdm_scale))
+    }
     positive <- weights > 0
     alpha <- weights[positive]
     # Gamma augmentation avoids all-zero draws for very small alpha values.

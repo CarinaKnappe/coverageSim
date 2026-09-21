@@ -37,7 +37,10 @@ simNGScoverage(
     frame_bias = list(source = "none")),
   technical_artifacts = NULL,
   ground_truth = FALSE,
-  debug_coverage = FALSE
+  debug_coverage = FALSE,
+  dmn_family = c("dirichlet", "generalized"),
+  dmn_gdm_scale = 1,
+  dmn_zero_inflation = 0
 )
 }
 \arguments{
@@ -160,6 +163,30 @@ writes one compressed fragment truth table next to each simulated library.}
 
 \item{debug_coverage}{logical, default FALSE. If TRUE, debug steps of coverage calculation,
 for parameter errors or just to understand how it all works.}
+
+\item{dmn_family}{"dirichlet" (default) or "generalized". Selects the
+distribution family used for Step-4 DMN sampling, see \code{rgdirmnom()}.
+At the default, sampling is byte-for-byte identical to always calling
+\code{extraDistr::rdirmnom()} directly (no behavior change). Applies to
+regions using \code{sampling = "DMN"}, including libraries with an active
+\code{fragment_geometry} bias under \code{fragment_mode = "simulated_rpf"}
+(those draw latent site probabilities via \code{draw_site_probabilities()}
+rather than integer counts via \code{rgdirmnom()} directly, but use the
+same family/scale/zero-inflation logic).}
+
+\item{dmn_gdm_scale}{positive numeric, default 1 (the standard Dirichlet
+distribution; same distribution as \code{dmn_family = "dirichlet"}, but
+not the same random numbers for a given seed). Only used when
+\code{dmn_family = "generalized"} (but always validated); see
+\code{rgdirmnom()}. Unlike
+\code{dmn_alpha_scale}, values away from 1 also shift the expected
+per-position coverage slightly, not only its variance -- see the Details
+section of \code{rgdirmnom()}.}
+
+\item{dmn_zero_inflation}{numeric in [0, 1), default 0 (off). Probability
+that an eligible Step-4 position is forced to a structural zero for a
+given simulated library, layered on top of the usual DMN sampling; see
+\code{rgdirmnom()}. Preserves the total read count per transcript region.}
 }
 \value{
 an \code{\link[ORFik]{experiment}}
