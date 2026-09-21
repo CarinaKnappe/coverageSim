@@ -44,3 +44,7 @@ tests/tests_and_demos/real_human_riboseq/
 /tests/testthat/test_real_input_validation.R
 /tests/testthat/test_rust_end_libraries.R
 /tests/testthat/test_rust_large_benchmark.R
+
+# Local agent notes (personal, go stale) and test logs.
+/.agents/
+/test_output.txt

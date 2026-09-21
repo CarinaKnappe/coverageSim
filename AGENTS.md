@@ -60,3 +60,16 @@ env -u LC_ALL R --vanilla -q -e 'devtools::load_all("."); testthat::test_dir("te
 - Prefer correctness over speed.
 - Verify assumptions by reading code before modifying anything.
 - Do not declare a task complete without tests that demonstrate correctness.
+
+## Local notes
+Personal notes, collaboration conventions and TODOs live in the git-ignored `.agents/` folder. Read it first if present.
+
+## Independent review with Codex
+After implementing a phase (code written, tests passing) and before handing it over, run Codex as a second reviewer:
+
+```bash
+git add -N <new files>   # otherwise untracked files are missing from the diff
+git diff | codex exec "Review this diff from an independent reviewer's perspective: correctness, edge cases, missing test coverage, and anything that looks unintentional. Do not modify any files. List concrete findings ranked by severity; if you find nothing, say so explicitly."
+```
+
+Keep the default read-only sandbox. Report Codex's findings in the summary and fix each one or explain why it does not apply. For a phase spanning several commits use `git diff <base>...HEAD`.
