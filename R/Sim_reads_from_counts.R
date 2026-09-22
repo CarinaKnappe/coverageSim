@@ -287,13 +287,16 @@ simNGScoverage <- function(simGenome,
       stopifnot(isTRUE(all.equal(sum(fragment_table$score), sum(dt_final$score))))
       gr_final <- simulated_rpf_alignments(
         fragment_table,
-        seqinfo = GenomeInfoDb::seqinfo(mrna_ranges)
+        seqinfo = fill_missing_seqlengths(GenomeInfoDb::seqinfo(mrna_ranges),
+                                          simGenome["genome"])
       )
     } else if (libClass == "GRanges") {
       gr_final <- makeGRangesFromDataFrame(dt_final, keep.extra.columns = TRUE)
     } else {
       gr_final <- ORFik:::getGAlignments(dt_final)
     }
+    output_seqinfo <- fill_missing_seqlengths(GenomeInfoDb::seqinfo(gr_final),
+                                              simGenome["genome"])
     format <- resolve_export_format(libFormats, libtypes[s])
     file_base <- file.path(out_dir, assay_column)
     if (simulated_rpf) {
@@ -314,13 +317,12 @@ simNGScoverage <- function(simGenome,
         artifact_records, file_base, ground_truth
       )
       write_artifact_library(
-        artifact_records, file_base, format,
-        GenomeInfoDb::seqinfo(gr_final)
+        artifact_records, file_base, format, output_seqinfo
       )
     } else {
       write_simulated_library(
         gr_final, file_base = file_base, format = format,
-        seqinfo = GenomeInfoDb::seqinfo(gr_final)
+        seqinfo = output_seqinfo
       )
     }
     files <- c(files, unname(written_files["default"]))

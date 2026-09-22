@@ -47,6 +47,12 @@ expand_fragment_records <- function(fragment_table) {
   records
 }
 
+# Draw from a vector of values. Unlike sample(), a single numeric value is never
+# treated as the range 1:value.
+resample_values <- function(values, size, replace = FALSE) {
+  values[sample.int(length(values), size, replace = replace)]
+}
+
 simulate_alignment_artifacts <- function(fragment_table, technical_artifacts) {
   settings <- normalize_technical_artifacts(technical_artifacts)
   primary <- expand_fragment_records(fragment_table)
@@ -77,7 +83,7 @@ simulate_alignment_artifacts <- function(fragment_table, technical_artifacts) {
     1L, original_count, settings$multimapping_rate
   )
   selected_multi <- if (requested_multi > 0L && any(eligible)) {
-    sample(which(eligible), min(requested_multi, sum(eligible)), replace = FALSE)
+    resample_values(which(eligible), min(requested_multi, sum(eligible)))
   } else integer()
   secondary <- primary[0]
   if (length(selected_multi)) {
@@ -85,8 +91,8 @@ simulate_alignment_artifacts <- function(fragment_table, technical_artifacts) {
     secondary <- data.table::rbindlist(lapply(selected_multi, function(i) {
       choices <- alternatives[[as.character(primary$fragment_length[i])]]
       choices <- choices[alignment_key[choices] != alignment_key[i]]
-      chosen <- sample(choices, settings$secondary_alignments, replace =
-                         length(choices) < settings$secondary_alignments)
+      chosen <- resample_values(choices, settings$secondary_alignments,
+                                replace = length(choices) < settings$secondary_alignments)
       result <- data.table::copy(primary[chosen])
       result[, `:=`(
         qname = primary$qname[i],

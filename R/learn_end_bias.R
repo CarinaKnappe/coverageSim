@@ -287,10 +287,16 @@ estimate_residual_autocorrelation <- function(sites, max_lag) {
   data[, residual := (observed - expected) / sqrt(expected)]
   per_transcript <- data[, {
     n <- .N
-    data.table::rbindlist(lapply(seq_len(min(max_lag, n - 1L)), function(lag) {
+    lags <- seq_len(min(max_lag, n - 1L))
+    if (!length(lags)) {
+      data.table::data.table(lag = integer(), correlation = numeric(),
+                             pairs = integer())
+    } else data.table::rbindlist(lapply(lags, function(lag) {
       left <- head(residual, -lag)
       right <- tail(residual, -lag)
-      correlation <- if (stats::sd(left) > 0 && stats::sd(right) > 0) {
+      # At least three pairs are needed for a standard deviation and a correlation.
+      correlation <- if (length(left) > 2L && isTRUE(stats::sd(left) > 0) &&
+                         isTRUE(stats::sd(right) > 0)) {
         stats::cor(left, right)
       } else {
         NA_real_
@@ -466,10 +472,16 @@ filter_end_learning_reads <- function(raw, min_mapq) {
     reads[, five_position := ifelse(
       strand == "+", position, position + reference_width - 1L
     )]
+    reads <- reads[, .(count = .N), by = .(
+      chromosome, position, five_position, strand, cigar, fragment_length
+    )]
+  } else {
+    reads <- data.table::data.table(
+      chromosome = character(), position = integer(), five_position = integer(),
+      strand = character(), cigar = character(), fragment_length = integer(),
+      count = integer()
+    )
   }
-  reads <- reads[, .(count = .N), by = .(
-    chromosome, position, five_position, strand, cigar, fragment_length
-  )]
   list(reads = reads, diagnostics = c(
     bam_records = length(keep), flag_or_mapq_or_NH_excluded = sum(!keep),
     unsupported_cigar = sum(is.na(cigar))))

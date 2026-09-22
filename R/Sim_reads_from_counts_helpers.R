@@ -283,7 +283,7 @@ sequence_table_controller <- function() {
       dt_range[, region_position := seq_len(.N), by = tile_groups]
       alpha_matrix <- NULL
       add_sequence_bias <- region %in% c("cds", "uorf") & !is.null(seq_bias)
-      if (unlist(sampling[[region]])[1] == "DMN") {
+      if (any(unlist(sampling[[region]]) %in% "DMN")) {
         rnase_extra <- max(0, length(rnase_bias[["RFP"]]) - 1)
         region_length_matrix <- list_to_mat(lengths, rnase_extra)
         assign(paste0("region_length_matrix", region), region_length_matrix)
@@ -423,6 +423,11 @@ add_sequence_bias <- function(simGenome, dt_range, tAI, region_ranges, lengths, 
     tAI$variable <- NULL
   }
   if (is.factor(tAI$seqs)) tAI[, seqs := as.character(seqs)]
+  if (anyNA(tAI$seqs) || anyDuplicated(tAI$seqs) || anyNA(tAI$alpha) ||
+      any(!is.finite(tAI$alpha)) || any(tAI$alpha <= 0)) {
+    stop("seq_bias needs exactly one finite, positive alpha value per motif",
+         call. = FALSE)
+  }
   unique_seqs <- tAI$seqs
   by_AA <- all(nchar(unique_seqs) == 1)
   by_codon <- any(nchar(unique_seqs) == 3)
@@ -439,12 +444,22 @@ add_sequence_bias <- function(simGenome, dt_range, tAI, region_ranges, lengths, 
                             as = as_seq,
                             start.as.hash = special_symbols[1], startp1.as.per = special_symbols[2],
                             stopm1.as.amp = special_symbols[3], return.as.list = TRUE)
+  missing_motifs <- setdiff(unique(unlist(seqs, use.names = FALSE)), tAI$seqs)
+  if (length(missing_motifs)) {
+    stop("seq_bias does not contain every ", as_seq, " found in the ", region,
+         " sequences (missing: ", paste(head(missing_motifs, 10), collapse = ", "),
+         "). Alpha values would be assigned to the wrong positions.", call. = FALSE)
+  }
   dt_range[, position := seq_len(.N), by = genes]
   tAI_short <- tAI[, c("seqs", "alpha")]
   tAI_merged <- data.table::merge.data.table(data.table(seqs = unlist(seqs, use.names = FALSE)),
                                              tAI_short, by = "seqs", sort = FALSE)
   # Create the alpha matrix for region
   seq_alpha <- tAI_merged$alpha[!is.na(tAI_merged$alpha)]
+  if (length(seq_alpha) != sum(lengths) / 3) {
+    stop("seq_bias contains missing alpha values for motifs in the ", region,
+         " sequences.", call. = FALSE)
+  }
   seq_alpha <- split(seq_alpha, dt_range$genes[c(T, F, F)])
   # seq_lengths <- lengths / 3
   # if (any(seq_lengths != as.integer(lengths/3))) stop("Mismatch of seqlength and divisor")
@@ -621,8 +636,13 @@ append_rnase_to_dt <- function(dt_range, lengths, rnase_bias) {
   gene_split_sites <- rep.int(gene_split_sites, rnase_reach)
   new_index_map <- sort(c(seq.int(nrow(dt_range)), gene_split_sites))
   dt_range <- dt_range[new_index_map, ]
-  dt_range[position == 1, start := start - seq.int(3,0)]
-  dt_range[dt_range[, .I[position == max(position)], by=genes]$V1, start := start + seq.int(0,3)]
+  # Extend each gene by the RNase reach at its 5' and 3' end, in transcript
+  # direction: genomic coordinates run backwards along minus-strand genes.
+  extension <- seq.int(rnase_reach, 0L)
+  direction <- function(strand) data.table::fifelse(strand == "-", -1L, 1L)
+  dt_range[position == 1, start := start - direction(strand) * extension]
+  dt_range[dt_range[, .I[position == max(position)], by = genes]$V1,
+           start := start + direction(strand) * rev(extension)]
   dt_range[, end := start]
   return(dt_range)
 }
@@ -671,4 +691,21 @@ reset_matrix <- function(res_matrix, alpha_matrix, lengths) {
     }
   }
   return(alpha_mat_3)
+}
+
+# Sequence lengths for SAM/BAM headers: use the reference FASTA where the
+# annotation carries none (a TxDb built from a GTF has NA lengths).
+fill_missing_seqlengths <- function(seqinfo, fasta_file) {
+  lengths <- GenomeInfoDb::seqlengths(seqinfo)
+  missing <- is.na(lengths) | lengths <= 0L
+  if (!any(missing)) return(seqinfo)
+  index <- Rsamtools::scanFaIndex(fasta_file)
+  reference <- stats::setNames(GenomicRanges::width(index),
+                               as.character(GenomicRanges::seqnames(index)))
+  fill <- names(lengths)[missing]
+  known <- fill %in% names(reference)
+  lengths[fill[known]] <- reference[fill[known]]
+  GenomeInfoDb::Seqinfo(GenomeInfoDb::seqnames(seqinfo), unname(lengths),
+                        GenomeInfoDb::isCircular(seqinfo),
+                        GenomeInfoDb::genome(seqinfo))
 }

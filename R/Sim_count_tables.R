@@ -59,48 +59,52 @@ simCountTables <- function (n = 500, libtypes = c("RFP", "RNA", "CAGE", "PAS"),
   beta_per_libtype <- matrix(beta_anchor + unlist(lapply(betaLibSD, function(x) rnorm(n, 0, x))), ncol = length(betaLibSD))
   colnames(beta_per_libtype) <- libtypes
 
-  if (length(conditions) > 1) { # The GLM dispersion between conditions
-    beta_between_cond <- rnorm(n, 0, betaSD)
+  n_conditions <- length(conditions)
+  if (n_conditions > 1) { # One effect per non-reference condition
+    beta_between_cond <- matrix(rnorm(n * (n_conditions - 1L), 0, betaSD), nrow = n)
+    colnames(beta_between_cond) <- conditions[-1]
   } else { # Add 0 betaSDs for metacolumns
     beta_between_cond <- NULL
   }
-  dispersion <- dispMeanRel(2^(beta_per_libtype))
+  dispersion <- matrix(dispMeanRel(2^(beta_per_libtype)), nrow = n)
+  stopifnot(ncol(dispersion) == length(libtypes))
+  colnames(dispersion) <- libtypes
   beta <- cbind(beta_per_libtype, beta_between_cond)
 
   colData <- DataFrame(libtype = factor(rep(libtypes, each = replicates*length(conditions)), levels = unique(libtypes)),
                        condition = factor(rep(conditions, each = replicates), levels = unique(conditions)),
                        replicate = as.character(seq(replicates)))
-  # The design matrix
-  x <- if (length(conditions) > 1 | length(libtypes) > 1) {
-    if (length(conditions) > 1 & length(libtypes) > 1){
-      stats::model.matrix.default(~ 0 + libtype + condition, data = colData) #+ colData$libtype:colData$condition
-    } else if (length(libtypes) > 1){
-      stats::model.matrix.default(~ 0 + colData$libtype)
-    } else if (length(conditions) > 1) {
-      stats::model.matrix.default(~ 1 + colData$condition)
-    }
-  }
-  else {
-    if (m == 1) {
-      rep(1, m)
-    } else cbind(rep(1, m), rep(0, m))
-  }
+  x <- count_design_matrix(colData, libtypes, conditions)
+  # Every sample uses the dispersion of its own library type
+  dispersion_per_sample <- dispersion[, match(as.character(colData$libtype), libtypes),
+                                      drop = FALSE]
 
   mu <- t(2^(x %*% t(beta)) * sizeFactors)
   # Size is here a dispersion shape parameter (non integer)
-  countData <- matrix(rnbinom(m * n, mu = mu, size = 1/dispersion),
+  countData <- matrix(rnbinom(m * n, mu = mu, size = 1/dispersion_per_sample),
                       ncol = m)
 
   mode(countData) <- "integer"
   colnames(countData) <- paste(colData$libtype, colData$condition, colData$replicate, sep = "_")
 
   object <- SummarizedExperiment(assays = countData, colData = colData, rowRanges = rowRanges)
-  if (m == 1) beta <- cbind(beta, rep(0, nrow(beta)))
-  trueVals <- DataFrame(trueIntercept = beta[, 1], trueBeta = beta[,2], trueDisp = dispersion)
-  colnames(trueVals)[2 + seq_along(betaLibSD)] <- paste0("trueDisp_", names(betaLibSD))
+  # True input values: the anchor, the condition effect(s) and the dispersions
+  true_condition <- if (n_conditions > 1) {
+    result <- beta_between_cond
+    colnames(result) <- if (n_conditions == 2) "trueBeta" else paste0("trueBeta_", conditions[-1])
+    result
+  } else {
+    matrix(0, nrow = n, ncol = 1, dimnames = list(NULL, "trueBeta"))
+  }
+  true_dispersion <- dispersion
+  colnames(true_dispersion) <- paste0("trueDisp_", libtypes)
+  trueVals <- DataFrame(as.data.frame(
+    cbind(trueIntercept = beta_per_libtype[, 1], true_condition, true_dispersion)
+  ))
   mcols(trueVals) <- DataFrame(type = rep("input", ncol(trueVals)),
-                               description = c("simulated intercept values", "simulated beta values",
-                                               paste0("simulated dispersion values: ", names(betaLibSD))))
+                               description = c(paste0("simulated intercept values (library type ", libtypes[1], ")"),
+                                               rep("simulated condition effect (log2)", ncol(true_condition)),
+                                               paste0("simulated dispersion values: ", libtypes)))
   mcols(object) <- cbind(mcols(object), trueVals)
   message("Count table statistics --")
 
@@ -194,8 +198,7 @@ simCountTablesRegions <- function(count_table = simCountTables(),
         rmultinom(1, x, prob = prop_mat[,libtype]))))
     } else {
       dt <- t(as.data.table(lapply(assay[,s], function(x)
-        extraDistr::rdirmnom(n = 1, size = x,
-                             alpha = prop_mat[,libtype]))))
+        sample_region_counts_dmn(x, prop_mat[,libtype]))))
     }
     colnames(dt) <- names(region_proportion)
     mat <-cbind(mat, dt)
@@ -211,4 +214,28 @@ simCountTablesRegions <- function(count_table = simCountTables(),
   assayNames(count_table) <- c("gene", regionsToSample)
   message("Done")
   return(count_table)
+}
+
+# Design matrix of the count simulation: one column per library type (or an
+# intercept for a single library type), plus one column per non-reference condition.
+count_design_matrix <- function(colData, libtypes, conditions) {
+  terms <- c(if (length(libtypes) > 1) "0 + libtype" else "1",
+             if (length(conditions) > 1) "condition")
+  stats::model.matrix(stats::as.formula(paste("~", paste(terms, collapse = " + "))),
+                      data = as.data.frame(colData))
+}
+
+# Dirichlet-multinomial draw over regions. Regions with proportion 0 receive no
+# reads (a zero Dirichlet parameter is invalid).
+sample_region_counts_dmn <- function(size, proportions) {
+  stopifnot(all(is.finite(proportions)), all(proportions >= 0))
+  counts <- numeric(length(proportions))
+  positive <- proportions > 0
+  if (sum(positive) == 1L) {
+    counts[positive] <- size
+  } else {
+    counts[positive] <- as.vector(extraDistr::rdirmnom(n = 1, size = size,
+                                                       alpha = proportions[positive]))
+  }
+  counts
 }

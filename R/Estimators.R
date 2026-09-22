@@ -192,11 +192,16 @@ autocor_window <- function(vec, max.lag, fill = NA, na.rm = FALSE,
                             FUN = function(x) mean(x/roll_function, na.rm =T),
                             align = "center", fill = NA)
   if (padding.rm) {
-    padd_to_keep <- ifelse(padding.rm > 1, padding.rm, 0)
-    left_pad_index <-  seq_along(padding_left - padd_to_keep)
-    right_pad_index <-  seq(length(roll) - length(padding_right) +
-                              1 + padd_to_keep, length(roll))
-    roll <- roll[-c(left_pad_index, right_pad_index)]
+    # padding.rm = TRUE removes all padding, an integer keeps that many
+    # positions of padding on each side.
+    # Only the inner max.lag padding positions per side hold computed values.
+    padd_to_keep <- min(if (is.logical(padding.rm)) 0 else padding.rm, split_2_low)
+    n_remove <- length(padding_left) - padd_to_keep
+    if (n_remove > 0) {
+      remove_index <- c(seq_len(n_remove),
+                        seq(length(roll) - n_remove + 1, length(roll)))
+      roll <- roll[-remove_index]
+    }
   } else if (na.rm) roll <- roll[!is.na(roll)]
   return(roll)
 }

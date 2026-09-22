@@ -97,6 +97,59 @@ replace_letters_by_width_group <- function(x, positions, letter = "C") {
   result
 }
 
+# Put transcript-oriented CDS sequences (exons in list order, minus-strand exons
+# already reverse-complemented) back into the chromosome sequences.
+write_cds_back_to_chromosomes <- function(chromosome_seqs, cds_grl, cds_seqs,
+                                          genes) {
+  for (i in genes) {
+    exons <- cds_grl[[i]]
+    chromosome <- as.character(GenomicRanges::seqnames(exons))[1]
+    offset <- 0L
+    for (j in seq_along(exons)) {
+      exon_width <- GenomicRanges::width(exons)[j]
+      piece <- Biostrings::subseq(cds_seqs[[i]], offset + 1L, offset + exon_width)
+      if (as.character(GenomicRanges::strand(exons))[j] == "-") {
+        piece <- Biostrings::reverseComplement(piece)
+      }
+      chromosome_seqs[[chromosome]] <- Biostrings::replaceAt(
+        chromosome_seqs[[chromosome]],
+        at = IRanges::IRanges(GenomicRanges::start(exons)[j], width = exon_width),
+        value = piece
+      )
+      offset <- offset + exon_width
+    }
+  }
+  chromosome_seqs
+}
+
+# Turn the third base of every internal stop codon into a non-stop base
+# (C on the plus strand, G on the minus strand). `stop_positions` holds, per
+# uORF, the positions inside the transcript-oriented uORF sequence; the exons of
+# each uORF are given in transcript order.
+replace_uorf_stop_bases <- function(chromosome_seqs, uorf_ranges, stop_positions) {
+  for (i in which(lengths(stop_positions) > 0L)) {
+    exons <- uorf_ranges[[i]]
+    on_plus <- as.character(GenomicRanges::strand(exons))[1] != "-"
+    widths <- GenomicRanges::width(exons)
+    exon_start <- cumsum(c(0L, widths))[seq_along(widths)]
+    for (position in stop_positions[[i]]) {
+      j <- findInterval(position - 1L, exon_start)
+      inside <- position - exon_start[j] - 1L
+      genomic <- if (on_plus) {
+        GenomicRanges::start(exons)[j] + inside
+      } else {
+        GenomicRanges::end(exons)[j] - inside
+      }
+      chromosome <- as.character(GenomicRanges::seqnames(exons))[j]
+      chromosome_seqs[[chromosome]] <- Biostrings::replaceLetterAt(
+        chromosome_seqs[[chromosome]], at = genomic,
+        letter = if (on_plus) "C" else "G"
+      )
+    }
+  }
+  chromosome_seqs
+}
+
 uorf_debug_warning <- function(problem) {
   warning(
     problem,
@@ -394,9 +447,11 @@ create_cds_ranges <- function(cds_string, cds_starts, seqnames, strand,
 
   } else {
     cds_string_genomic <- cds_string
-    new_ranges <- IRanges(cds_starts, width = cds_length + 6)
+    # cds_string holds the start codon, the CDS body and the stop codon.
+    cds_width <- width(cds_string)
+    new_ranges <- IRanges(cds_starts, width = cds_width)
     new_ranges[strand == "-"] <- IRanges(end = cds_starts[strand == "-"],
-                                         width = cds_length + 6)
+                                         width = cds_width[strand == "-"])
     cds_ranges <- GRanges(seqnames, new_ranges, strand = strand,
                           source = factor("toy_data"), type = factor("CDS"), score = as.numeric(NA), phase = as.integer(0), # Update phase if needed
                           gene_id = gene_names, gene_version = 1,
@@ -494,10 +549,10 @@ create_uORFs <- function(leader_string, chromosome_seqs, n,
   internal_inframe_stops <- 3 + (start(Biostrings::vmatchPattern("*", heads(translate(new_cds_string), -1))) - 1)*3
   if(!all(lengths(internal_inframe_stops) == 0)) {
     temp <- replace_letters_by_width_group(new_cds_string, internal_inframe_stops)
-    a <- cds_grl; names(a) <- NULL
-    b <- temp; b[!strandBool(a)] <- reverseComplement(b[!strandBool(a)])
-    matching <- chmatch(names(chromosome_seqs), seqnamesPerGroup(a, FALSE))
-    chromosome_seqs[ranges(sort(a[matching]))] <- as(unlist(b[matching]), "DNAStringSet")
+    # Write every repaired CDS back, not only the first gene of each chromosome.
+    chromosome_seqs <- write_cds_back_to_chromosomes(
+      chromosome_seqs, cds_grl, temp, which(lengths(internal_inframe_stops) > 0)
+    )
   }
 
   # Fix uORF Starts that were overwritten
@@ -545,12 +600,9 @@ create_uORFs <- function(leader_string, chromosome_seqs, n,
   new_uorf_string <- chromosome_seqs[uorf_ranges]
   internal_inframe_stops <- 3 + (start(Biostrings::vmatchPattern("*", heads(translate(new_uorf_string), -1))) - 1)*3
   if(!all(lengths(internal_inframe_stops) == 0)) {
-    hits <- lengths(internal_inframe_stops) > 0
-    temp <- rep(ifelse(strandBool(uorf_ranges[hits]), "C", "G"), lengths(internal_inframe_stops)[hits])
-    temp <- DNAString(paste(strsplit(temp, split = ""), collapse = ""))
-    a <- IRangesList(internal_inframe_stops[hits]); names(a) <- which(hits)
-    a <- pmapFromTranscriptF(a, uorf_ranges); names(a) <- NULL
-    chromosome_seqs[seqnamesPerGroup(a, FALSE)][ranges(a)] <- as(temp, "DNAStringSet")
+    chromosome_seqs <- replace_uorf_stop_bases(
+      chromosome_seqs, uorf_ranges, internal_inframe_stops
+    )
   }
   print("uORF internal stop done")
   # uORF sanity tests
@@ -656,13 +708,14 @@ distribute_reads_to_uORFs <- function(region_counts, assay, uorf_ranges, uorf_pr
   uorf_tx_names <- txNames(uorf_ranges)
 
   prob <- if (uorf_prop_mode == "character") {
-    if (uorf_prop_within_gene == "uniform") {
-      a <- rep(1, length(uorf_ranges))
-      names(a) <- uorf_tx_names
+    # "uniform": every uORF of a gene gets the same share;
+    # "length": the share is proportional to the uORF length.
+    a <- if (uorf_prop_within_gene == "uniform") {
+      rep(1, length(uorf_ranges))
     } else {
-      stop("Not implemented yet")
-      lapply(unique(uorf_tx_names), function(x) rmultinom(1, region_counts[x], rep(1, sum(uorf_tx_names == x))))
+      as.numeric(widthPerGroup(uorf_ranges, FALSE))
     }
+    names(a) <- uorf_tx_names
     a
   } else uorf_prop_within_gene
   allocated_counts <- numeric(length(uorf_tx_names))
