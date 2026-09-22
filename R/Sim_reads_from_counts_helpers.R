@@ -181,6 +181,25 @@ resolve_dmn_alpha_scale <- function(scale, seq_bias) {
   learned
 }
 
+# "AUTO" (simNGScoverage()'s seq_bias default) picks the bundled table whose
+# `shift` matches fragment_geometry$site_reference, so the codon-bias table
+# and the simulated-RPF fragment placement describe the same ribosome site by
+# default (see simNGScoverage()'s seq_bias/fragment_geometry docs). site_reference
+# only affects simulated_rpf's physical fragment placement, so "AUTO" keeps the
+# historical P-site table for every other fragment_mode. Matches the
+# true_uorf_ranges = "AUTO" sentinel convention already used by
+# simNGScoverage(); any other seq_bias value -- including NULL, which
+# disables codon bias -- is always used as-is, and (unlike a missing()-based
+# check) this still works when a wrapper function redeclares its own
+# seq_bias = "AUTO" default and forwards it explicitly.
+resolve_seq_bias <- function(seq_bias, fragment_mode, site_reference) {
+  if (!identical(seq_bias, "AUTO")) return(seq_bias)
+  # site_reference only governs simulated_rpf's physical fragment placement;
+  # every other fragment_mode keeps the historical P-site table.
+  shift <- if (fragment_mode == "simulated_rpf") site_reference else "p_site"
+  load_seq_bias(shift = gsub("_", "-", shift, fixed = TRUE))
+}
+
 scale_dmn_alpha <- function(alpha_rows, scale) {
   validate_dmn_alpha_scale(scale)
   scaled <- lapply(alpha_rows, function(alpha) alpha * scale)

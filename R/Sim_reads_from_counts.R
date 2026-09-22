@@ -51,9 +51,18 @@
 #'  list(RFP = "ofst", RNA = "ofst", CAGE = "ofst", PAS = "ofst"). Alternatives:
 #'  "sam" and "bam".
 #' @param true_uorf_ranges = "AUTO". Load from uorf string in 'simGenome'.
-#' @param seq_bias the sequence bias used for simulation, default:
-#' load_seq_bias(), the motif-wise median of the amino-acid alpha estimates from
-#' P-site shifted reads in libraries R1--R10 from the coverageSim paper. Specifically it is:
+#' @param seq_bias the sequence bias used for simulation, default \code{"AUTO"}:
+#' resolved to \code{load_seq_bias(shift = fragment_geometry$site_reference)},
+#' the motif-wise median of the amino-acid alpha estimates from libraries
+#' R1--R10 from the coverageSim paper, shifted to match whichever ribosome
+#' site \code{fragment_geometry$site_reference} uses to place simulated-RPF
+#' fragments around each nucleotide's signal position. Only resolved this way
+#' for \code{fragment_mode = "simulated_rpf"} (including the deprecated
+#' \code{"physical"} alias), the only mode where \code{site_reference} has any
+#' effect; for \code{"legacy_point"}, \code{"AUTO"} always resolves to the
+#' P-site table regardless of \code{fragment_geometry}. Pass a table (or
+#' \code{NULL}, to disable codon bias) explicitly to opt out of this
+#' matching. Otherwise it is:
 #' a data.table with correctly named columns:
 #'  "seq", "alpha"\cr
 #'  the column seq (Amino acid, 1 letter per)
@@ -79,7 +88,8 @@
 #' The former name `"physical"` remains as a deprecated compatibility alias.
 #' @param fragment_geometry Named list controlling simulated RPFs. Supports
 #' `source` (`"default"`, `"user"`, or `"learned"`), `site_reference`
-#' (`"p_site"` or `"a_site"`), a joint `distribution` with fragment_length,
+#' (`"p_site"` or `"a_site"`; also selects the default \code{seq_bias} table's
+#' site convention, see \code{seq_bias} above), a joint `distribution` with fragment_length,
 #' site_offset, and probability columns, and `boundary_action`. The default
 #' `"renormalize"` conditions probabilities on valid boundary geometry and
 #' preserves counts; `"error"` rejects impossible geometry.
@@ -165,7 +175,7 @@ simNGScoverage <- function(simGenome,
                                              CAGE = "GRanges", PAS = "GRanges"),
                            libFormats = list(RFP = "ofst", RNA = "ofst",
                                              CAGE = "ofst", PAS = "ofst"),
-                           seq_bias = load_seq_bias(),
+                           seq_bias = "AUTO",
                            true_uorf_ranges = "AUTO", uorf_prop_within_gene = "uniform",
                            validate = TRUE,
                            fragment_mode = c("simulated_rpf", "legacy_point", "physical"),
@@ -194,16 +204,17 @@ simNGScoverage <- function(simGenome,
       stop("Active technical_artifacts require RFP output format 'sam' or 'bam'")
     }
   }
-  validate_sequence_profile(seq_bias)
-  dmn_alpha_scale <- resolve_dmn_alpha_scale(dmn_alpha_scale, seq_bias)
-  dmn_family <- match.arg(dmn_family)
-  validate_dmn_gdm_scale(dmn_gdm_scale)
-  validate_dmn_zero_inflation(dmn_zero_inflation)
   if (fragment_mode == "physical") {
     warning("fragment_mode = 'physical' is deprecated; use 'simulated_rpf'")
     fragment_mode <- "simulated_rpf"
   }
   fragment_geometry <- normalize_fragment_geometry(fragment_geometry)
+  seq_bias <- resolve_seq_bias(seq_bias, fragment_mode, fragment_geometry$site_reference)
+  validate_sequence_profile(seq_bias)
+  dmn_alpha_scale <- resolve_dmn_alpha_scale(dmn_alpha_scale, seq_bias)
+  dmn_family <- match.arg(dmn_family)
+  validate_dmn_gdm_scale(dmn_gdm_scale)
+  validate_dmn_zero_inflation(dmn_zero_inflation)
   input_validation_controller()
 
   # Load annotation
