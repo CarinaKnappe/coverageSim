@@ -110,25 +110,11 @@ validate_region_learning_input <- function(
   }
 }
 
+# See build_transcript_models() in fragment_geometry.R for the shared
+# implementation; this wrapper additionally rejects transcripts whose exons
+# span more than one chromosome, which the geometry-learning callers need.
 transcript_geometry_models <- function(transcripts) {
-  models <- lapply(seq_along(transcripts), function(i) {
-    exons <- transcripts[[i]]
-    exon_rank <- S4Vectors::mcols(exons)$exon_rank
-    if (!is.null(exon_rank)) exons <- exons[order(exon_rank)]
-    strand_value <- as.character(unique(GenomicRanges::strand(exons)))
-    chromosome <- unique(as.character(GenomicRanges::seqnames(exons)))
-    if (length(strand_value) != 1L || !strand_value %in% c("+", "-") ||
-        length(chromosome) != 1L) {
-      stop("Transcript has inconsistent chromosome or strand: ", names(transcripts)[i])
-    }
-    list(
-      transcript_id = names(transcripts)[i], exons = exons,
-      cumulative_start = cumsum(c(1L, head(GenomicRanges::width(exons), -1L))),
-      length = sum(GenomicRanges::width(exons)), strand = strand_value
-    )
-  })
-  names(models) <- names(transcripts)
-  models
+  build_transcript_models(transcripts, check_chromosome = TRUE)
 }
 
 project_region_learning_reads <- function(reads, models, distribution) {

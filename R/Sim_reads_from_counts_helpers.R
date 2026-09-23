@@ -651,7 +651,7 @@ append_rnase_to_dt <- function(dt_range, lengths, rnase_bias) {
   gene_split_sites_end <- cumsum(lengths)
   gene_split_sites_start <- c(1, (gene_split_sites_end + 1)[-length(lengths)])
   gene_split_sites <- sort(c(gene_split_sites_start, gene_split_sites_end))
-  rnase_reach <- floor(length(rnase_bias[["RFP"]]) / 2)
+  rnase_reach <- rnase_kernel_reach(rnase_bias)
   gene_split_sites <- rep.int(gene_split_sites, rnase_reach)
   new_index_map <- sort(c(seq.int(nrow(dt_range)), gene_split_sites))
   dt_range <- dt_range[new_index_map, ]

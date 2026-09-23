@@ -16,8 +16,7 @@ simNGScoverage(
     list(RFP = quote(rep(c(1, 0, 0), length.out = x))), trailer = list(PAS =
     quote(c(rep.int(0, x - 1), 1))), uorf = list(RFP = quote(rep(c(1, 0, 0), length.out =
     x)))),
-  rnase_bias = list(RFP = c(0.5, 2, 1, 10, 2, 1, 0.5), RNA = rnase_models(), CAGE =
-    rnase_models(), PAS = rnase_models()),
+  rnase_bias = list(RFP = c(0.5, 2, 1, 10, 2, 1, 0.5), RNA = 1, CAGE = 1, PAS = 1),
   auto_correlation = list(cds = list(RFP = shapes(9)), uorf = list(RFP = shapes(9))),
   read_lengths_per = list(RFP = 27:29, RNA = 100, CAGE = 1, PAS = 1),
   sampling = list(leader = list(RFP = "MN", RNA = "MN"), cds = list(RFP = "DMN"), trailer

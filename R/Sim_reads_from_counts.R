@@ -160,8 +160,8 @@ simNGScoverage <- function(simGenome,
                                             cds =          list(RFP = quote(rep(c(1, 0, 0), length.out = x))),
                                             trailer =      list(PAS = quote(c(rep.int(0, x -1), 1))),
                                             uorf =         list(RFP = quote(rep(c(1, 0, 0), length.out = x)))),
-                           rnase_bias = list(RFP = c(0.5,2,1,10,2,1,0.5), RNA = rnase_models(),
-                                             CAGE = rnase_models(), PAS = rnase_models()),
+                           rnase_bias = list(RFP = c(0.5,2,1,10,2,1,0.5), RNA = 1,
+                                             CAGE = 1, PAS = 1),
                            auto_correlation = list(cds = list(RFP = shapes(9)),
                                                    uorf =list(RFP = shapes(9))),
                            read_lengths_per = list(RFP = 27:29, RNA = 100,
@@ -350,14 +350,6 @@ simNGScoverage <- function(simGenome,
   message("Saved ORFik experiment with name:")
   message(exp_name)
   return(read.experiment(exp_name, in.dir = exp_save_dir, validate = validate))
-}
-
-rnase_models <- function(radius = c(0.5,1,2,10,2,1,0.5),
-                         type = "RFP") {
-  if (type == "exp") {
-    window <- c()
-  }
-  return(1)
 }
 
 nt_coverage_all_regions <- function(count_table_regions, libClass,

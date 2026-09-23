@@ -297,27 +297,62 @@ resolve_fragment_distribution <- function(fragment_lengths, geometry) {
   default_fragment_distribution(fragment_lengths, geometry$site_reference)
 }
 
-transcript_models <- function(mrna_ranges, fasta_file) {
-  sequences <- ORFik::txSeqsFromFa(mrna_ranges, fasta_file)
-  models <- lapply(seq_along(mrna_ranges), function(i) {
-    exons <- mrna_ranges[[i]]
+# Shared core for building the per-transcript position/strand model used by
+# fragment-geometry projection and placement, learned end-bias, and
+# region-proportion/fragment-geometry learning: exon coordinates, each
+# exon's cumulative transcript-position start, transcript length, and
+# strand. fasta_file, when given, also fetches and attaches the transcript
+# sequence (needed to look up sequence/codon motifs during simulation and
+# end-bias learning; the geometry-learning callers don't need it and don't
+# pass it). check_chromosome additionally rejects a transcript whose exons
+# span more than one chromosome, which only the geometry-learning callers
+# have historically required.
+build_transcript_models <- function(ranges, fasta_file = NULL,
+                                    check_chromosome = FALSE) {
+  sequences <- if (!is.null(fasta_file)) ORFik::txSeqsFromFa(ranges, fasta_file)
+  models <- lapply(seq_along(ranges), function(i) {
+    exons <- ranges[[i]]
     exon_rank <- S4Vectors::mcols(exons)$exon_rank
     if (!is.null(exon_rank)) exons <- exons[order(exon_rank)]
     strand_value <- as.character(unique(GenomicRanges::strand(exons)))
-    if (length(strand_value) != 1L || !strand_value %in% c("+", "-")) {
-      stop("Transcript has missing or inconsistent strand: ", names(mrna_ranges)[i])
+    strand_ok <- length(strand_value) == 1L && strand_value %in% c("+", "-")
+    if (check_chromosome) {
+      chromosome <- unique(as.character(GenomicRanges::seqnames(exons)))
+      if (!strand_ok || length(chromosome) != 1L) {
+        stop("Transcript has inconsistent chromosome or strand: ", names(ranges)[i])
+      }
+    } else if (!strand_ok) {
+      stop("Transcript has missing or inconsistent strand: ", names(ranges)[i])
     }
-    list(
-      transcript_id = names(mrna_ranges)[i],
+    model <- list(
+      transcript_id = names(ranges)[i],
       exons = exons,
       cumulative_start = cumsum(c(1L, head(GenomicRanges::width(exons), -1L))),
       length = sum(GenomicRanges::width(exons)),
-      strand = strand_value,
-      sequence = as.character(sequences[[i]])
+      strand = strand_value
     )
+    if (!is.null(fasta_file)) model$sequence <- as.character(sequences[[i]])
+    model
   })
-  names(models) <- names(mrna_ranges)
+  names(models) <- names(ranges)
   models
+}
+
+transcript_models <- function(mrna_ranges, fasta_file) {
+  # fasta_file is required here (unlike build_transcript_models()'s optional
+  # default): every caller needs the attached sequence, so fail fast on a
+  # missing one instead of silently building sequence-less models.
+  if (is.null(fasta_file)) stop("fasta_file is required by transcript_models()")
+  build_transcript_models(mrna_ranges, fasta_file = fasta_file)
+}
+
+# How many nucleotides on each side of a footprint the RNase kernel reaches:
+# the RFP kernel's half-width, rounded down. Shared by both fragment_mode's
+# RNase-extension helpers (this file's append_rnase_to_simulated_rpf_table()
+# and Sim_reads_from_counts_helpers.R's append_rnase_to_dt()) so the two
+# fragment modes always extend by the same amount for the same kernel.
+rnase_kernel_reach <- function(rnase_bias) {
+  floor(length(rnase_bias[["RFP"]]) / 2L)
 }
 
 genomic_site_to_transcript <- function(model, genomic_position) {
@@ -348,7 +383,7 @@ transcript_position_to_genomic <- function(model, transcript_position) {
 
 append_rnase_to_simulated_rpf_table <- function(dt_range, rnase_bias,
                                                 transcript_models) {
-  reach <- floor(length(rnase_bias[["RFP"]]) / 2L)
+  reach <- rnase_kernel_reach(rnase_bias)
   if (reach == 0L) return(dt_range)
   groups <- split(dt_range, dt_range$genes, keep.by = TRUE)
   data.table::rbindlist(lapply(groups, function(group) {
