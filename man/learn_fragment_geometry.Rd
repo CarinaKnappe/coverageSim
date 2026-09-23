@@ -13,7 +13,8 @@ learn_fragment_geometry(
   max_length = 34L,
   min_reads_per_length = 100L,
   offset_search = 2L,
-  min_mapq = 20L
+  min_mapq = 20L,
+  offset_relative_threshold = 1
 )
 }
 \arguments{
@@ -33,6 +34,24 @@ learn_fragment_geometry(
 default offset.}
 
 \item{min_mapq}{Minimum mapping quality. Default 20.}
+
+\item{offset_relative_threshold}{Numeric in (0, 1], default 1. For each
+fragment length, every candidate offset whose in-frame fraction is at
+least this fraction of that length's best candidate is kept, instead of
+only the single best one. At the default (1), this keeps only ties for
+the best -- i.e. exactly one offset per length, as before. A value below
+1 (e.g. 0.5) recovers real footprint-to-footprint jitter in where the
+ribosome site sits relative to the fragment's 5' end, as a
+probability-weighted spread of offsets per length instead of collapsing
+it to one fixed value; \code{fragment_geometry$distribution} and
+simulated-RPF fragment placement already support this directly (see
+\code{simNGScoverage()}). Only \code{learn_end_bias()} and
+\code{learn_region_proportions()} currently require one offset per
+length; feed them a single-offset geometry if a learned spread from here
+is not directly reusable there. In-frame fraction can only identify the
+correct reading frame (offset modulo 3), not an exact absolute offset;
+two candidates a whole number of codons apart are collapsed to the
+better-supported one instead of being reported as independent jitter.}
 }
 \value{
 A simulator-ready fragment_geometry list. The diagnostics attribute

@@ -213,6 +213,20 @@ make_synthetic_end_bias <- function(k = 1L, enriched_kmer = "G",
   result[]
 }
 
+# The biologically plausible default P-site (ribosome peptidyl-site) offset
+# from a fragment's 5' end, by fragment length, plus 3 nt more for the
+# A-site (one codon further into the ribosome). This is the simulator's own
+# default geometry (default_fragment_distribution() below); elsewhere it is
+# only an initial guess used to center a search window when learning real
+# offsets (learn_fragment_geometry(), and the rust_helpers analysis scripts
+# via coverageSim:::default_ribosome_site_offset(), kept in sync with this
+# rather than an independently duplicated copy of the same formula).
+default_ribosome_site_offset <- function(fragment_length, site_reference) {
+  p_offset <- ifelse(fragment_length <= 27L, 11L,
+                     ifelse(fragment_length <= 30L, 12L, 13L))
+  as.integer(p_offset + ifelse(site_reference == "a_site", 3L, 0L))
+}
+
 default_fragment_distribution <- function(fragment_lengths,
                                           site_reference = "a_site") {
   length_counts <- table(as.integer(fragment_lengths))
@@ -220,8 +234,7 @@ default_fragment_distribution <- function(fragment_lengths,
   length_weight <- stats::dnorm(lengths, mean = 29, sd = 1.5) *
     as.numeric(length_counts)
   if (!any(length_weight > 0)) length_weight <- as.numeric(length_counts)
-  p_offset <- ifelse(lengths <= 27L, 11L, ifelse(lengths <= 30L, 12L, 13L))
-  offset <- p_offset + ifelse(site_reference == "a_site", 3L, 0L)
+  offset <- default_ribosome_site_offset(lengths, site_reference)
   offset <- pmin(offset, lengths - 1L)
   data.table::data.table(
     fragment_length = lengths,
