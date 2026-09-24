@@ -22,6 +22,25 @@ test_that("simCountTables works for every library type and condition layout", {
   }
 })
 
+test_that("simCountTablesRegions() works for a single-gene count table", {
+  # mat[, colnames(mat) == region] (Sim_count_tables.R) used to drop to a
+  # plain vector for exactly one gene (R's default `[` drop = TRUE), which
+  # as.matrix() then rebuilt as a column matrix (samples x 1) instead of the
+  # intended (1 gene x samples) -- colnames<- then failed with "length of
+  # 'dimnames' [2] not equal to array extent".
+  set.seed(1)
+  counts <- quiet_count_tables(
+    n = 1, libtypes = c("RFP", "RNA"), conditions = "WT", replicates = 1
+  )
+  region_counts <- suppressMessages(simCountTablesRegions(
+    counts, regionsToSample = c("leader", "cds")
+  ))
+  expect_equal(dim(SummarizedExperiment::assay(region_counts, "cds")), c(1L, 2L))
+  expect_equal(dim(SummarizedExperiment::assay(region_counts, "leader")), c(1L, 2L))
+  expect_equal(colnames(SummarizedExperiment::assay(region_counts, "cds")),
+               colnames(SummarizedExperiment::assay(counts)))
+})
+
 test_that("every sample uses the dispersion of its own library type", {
   set.seed(2)
   # RFP gets an almost Poisson dispersion, RNA a very large one.

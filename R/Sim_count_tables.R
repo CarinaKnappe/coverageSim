@@ -205,7 +205,12 @@ simCountTablesRegions <- function(count_table = simCountTables(),
 
   }
   split_mat <- lapply(regionsToSample, function(region) {
-    mat_region <- as.matrix(mat[, colnames(mat) == region])
+    # drop = FALSE: with exactly one gene, mat[, cols] (without it) collapses
+    # to a plain vector; as.matrix() on that then builds a column matrix
+    # (length(cols) x 1) instead of the intended (1 gene x length(cols)
+    # samples), so the colnames<- below failed with "length of 'dimnames'
+    # [2] not equal to array extent".
+    mat_region <- as.matrix(mat[, colnames(mat) == region, drop = FALSE])
     colnames(mat_region) <- colnames
     rownames(mat_region) <- rownames
     mat_region

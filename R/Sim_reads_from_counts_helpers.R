@@ -238,7 +238,11 @@ assay_by_chromo <- function(assay, seqnamesPer) {
   # A plain base matrix (or a DelayedMatrix coerced to one) isn't affected.
   assay_by_chromosome <- as.data.table(as.matrix(assay))
   assay_by_chromosome <- if (nrow(assay_by_chromosome) == 1) {
-    cbind(seqnamesPerGroup = seqnamesPer, assay_by_chromosome)
+    # Column name must match the `else` branch's own grouping column
+    # (seqnamesPer, not seqnamesPerGroup) -- the caller
+    # (assay_by_chromosome$seqnamesPer in simNGScoverage()) currently only
+    # resolves correctly here by data.table's $ partial-name matching.
+    cbind(seqnamesPer = seqnamesPer, assay_by_chromosome)
   } else {
     assay_by_chromosome[, lapply(.SD, sum, na.rm=TRUE), by=.(seqnamesPer)]
   }

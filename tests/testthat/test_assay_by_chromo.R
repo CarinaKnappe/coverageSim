@@ -12,6 +12,19 @@ test_that("assay_by_chromo() keeps the sample column name for a single-column De
   expect_equal(delayed_result, base_result)
 })
 
+test_that("assay_by_chromo() names its grouping column seqnamesPer for a single-gene assay", {
+  # The nrow(assay_by_chromosome) == 1 branch (only one gene total in the
+  # whole simulated genome) used to name this column seqnamesPerGroup, while
+  # its only caller (simNGScoverage()) reads $seqnamesPer -- previously this
+  # only resolved by data.table's $ partial-name matching rather than an
+  # exact match, which is fragile (e.g. it would break if a second column
+  # starting with "seqnamesPer" were ever added).
+  m <- matrix(2000L, 1L, 1L, dimnames = list("g1", "RFP_x"))
+  result <- assay_by_chromo(m, "chr1")
+  expect_identical(names(result)[1], "seqnamesPer")
+  expect_equal(result$seqnamesPer, "chr1")
+})
+
 test_that("assay_by_chromo() is unaffected for multi-column assays, delayed or not", {
   m <- matrix(2000L, 4L, 2L, dimnames = list(paste0("g", 1:4), c("RFP_x", "RNA_x")))
   seqnames_per <- rep("chr1", 4L)
