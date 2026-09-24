@@ -230,7 +230,13 @@ get_value <- function(x, region, libtype) {
 }
 
 assay_by_chromo <- function(assay, seqnamesPer) {
-  assay_by_chromosome <- as.data.table(assay)
+  # as.matrix(): as.data.table() on a single-column DelayedMatrix silently
+  # drops its column name (its as.array(x, drop = TRUE) collapses to a bare
+  # vector, so data.table falls back to naming the column after that
+  # deparsed expression instead) -- only reproducible with exactly one
+  # column, since a wider DelayedMatrix keeps its real dimensions and names.
+  # A plain base matrix (or a DelayedMatrix coerced to one) isn't affected.
+  assay_by_chromosome <- as.data.table(as.matrix(assay))
   assay_by_chromosome <- if (nrow(assay_by_chromosome) == 1) {
     cbind(seqnamesPerGroup = seqnamesPer, assay_by_chromosome)
   } else {
