@@ -415,12 +415,26 @@ nt_coverage_all_regions <- function(count_table_regions, libClass,
           sample <- flatten_sample_rows(sample, res_lengths)
         }
       } else { #MN
-        sampled_lengths <- lengths
+        # sequence_table_controller() extends dt_region's rows by this same
+        # reach at each gene's 5' and 3' end whenever *any* libtype samples
+        # this region with DMN and a real (>0 reach) rnase_bias kernel is
+        # set, regardless of which libtype we're sampling here -- see its
+        # region_rnase_reach_<region> comment. MN sampling never applies
+        # rnase_bias itself, so it zero-pads to match instead of inventing
+        # smeared reads for positions it doesn't model; 0 when this region
+        # wasn't extended, which reduces to the original unpadded behavior.
+        region_rnase_reach <- get(paste0("region_rnase_reach_", region), envir = env)
+        sampled_lengths <- if (region_rnase_reach > 0L) {
+          lengths + 2L * region_rnase_reach
+        } else lengths
         sample <- lapply(seq_along(region_ranges), function(y) {
           x <- lengths[y]
           weights <- eval(ideal_cov)
-          if (defer_counts) draw_site_probabilities(weights) * region_counts[y]
+          values <- if (defer_counts) draw_site_probabilities(weights) * region_counts[y]
           else as.vector(rmultinom(1, region_counts[y], weights))
+          if (region_rnase_reach > 0L) {
+            c(rep(0, region_rnase_reach), values, rep(0, region_rnase_reach))
+          } else values
         })
         sample <- unlist(sample, use.names = FALSE)
       }

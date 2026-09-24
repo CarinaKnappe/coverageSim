@@ -35,6 +35,26 @@ test_that("a region missing from `sampling` defaults to multinomial sampling", {
   expect_equal(sum(S4Vectors::mcols(reads)$score), 4 * 2000)
 })
 
+test_that("MN sampling of a region ignores a real RNase kernel instead of crashing", {
+  # A region-wide multi-element RNase kernel used to unconditionally extend
+  # dt_range regardless of sampling mode, but only DMN sampling ever filled
+  # those extra rows -- MN sampling never applies rnase_bias at all, so its
+  # score vector stayed at the original (unextended) length and the later
+  # dt_region[, score := sample] assignment crashed with a length mismatch.
+  fixture <- small_pipeline_fixture("cds")
+  out_dir <- tempfile("reads-"); exp_dir <- tempfile("exp-")
+  dir.create(out_dir); dir.create(exp_dir)
+  experiment <- suppressMessages(simNGScoverage(
+    fixture$genome, fixture$counts, out_dir = out_dir, exp_name = "mn_with_rnase",
+    exp_save_dir = exp_dir, fragment_mode = "legacy_point",
+    sampling = list(cds = list(RFP = "MN")),
+    rnase_bias = list(RFP = c(0.5, 2, 1, 10, 2, 1, 0.5)),
+    libFormats = list(RFP = "ofst"), validate = FALSE
+  ))
+  reads <- ORFik::fimport(ORFik::filepath(experiment, "default")[[1]])
+  expect_equal(sum(S4Vectors::mcols(reads)$score), 4 * 2000)
+})
+
 test_that("RNase extension follows the transcript direction on both strands", {
   # Two genes with six positions each: plus strand ascending, minus strand descending.
   dt_range <- data.table::data.table(

@@ -302,7 +302,36 @@ sequence_table_controller <- function() {
       dt_range[, region_position := seq_len(.N), by = tile_groups]
       alpha_matrix <- NULL
       add_sequence_bias <- region %in% c("cds", "uorf") & !is.null(seq_bias)
-      if (any(unlist(sampling[[region]]) %in% "DMN")) {
+      # Only DMN sampling (via sim_sequence_bias()'s RNase-kernel smoothing,
+      # which grows each gene's alpha vector by the kernel's extra reach)
+      # consumes the RNase-extended rows added below. MN sampling never
+      # applies rnase_bias at all and only ever produces one score per
+      # original position, so extending dt_range for a region no libtype
+      # samples with DMN would only add rows nothing fills in, breaking the
+      # score-assignment length match later in nt_coverage_all_regions().
+      # Resolve each libtype actually present in count_table's per-sample
+      # sampling mode the same way nt_coverage_all_regions() itself does
+      # (get_value() falling back to "MN") -- not just the raw sampling[[region]]
+      # list -- so a libtype named in `sampling` that isn't actually part of
+      # this experiment is ignored, and a real libtype silently defaulting to
+      # MN (because it's missing from `sampling`) is still accounted for.
+      # Also skip a libtype whose samples all have zero counts *for this
+      # region*: nt_coverage_all_regions() itself never samples those (its
+      # `if (sum(region_counts) > 0)` guard), so they can never hit the
+      # length-mismatch this check exists to catch, e.g. an RNA library with
+      # reads only in the leader while cds is being set up here.
+      # as.matrix(): assay() preserves whatever matrix-like class the assay
+      # was stored as (e.g. a DelayedMatrix), which base::colSums() (the
+      # unqualified name in scope here) does not accept.
+      region_assay <- as.matrix(assay(count_table, region))
+      sample_libtypes <- as.character(colData(count_table)$libtype)
+      region_libtypes <- unique(sample_libtypes[colSums(region_assay) > 0])
+      region_modes <- vapply(region_libtypes, function(lt) {
+        mode <- get_value(sampling, region, lt)
+        if (is.null(mode)) "MN" else mode
+      }, character(1))
+      region_uses_dmn <- any(region_modes == "DMN")
+      if (region_uses_dmn) {
         rnase_extra <- max(0, length(rnase_bias[["RFP"]]) - 1)
         region_length_matrix <- list_to_mat(lengths, rnase_extra)
         assign(paste0("region_length_matrix", region), region_length_matrix)
@@ -313,7 +342,21 @@ sequence_table_controller <- function() {
         alpha_matrix <- add_sequence_bias(simGenome, dt_range, seq_bias,
                                           region_ranges, lengths, region)
       }
-      if (!is.null(rnase_bias[["RFP"]]) & (region %in% c("cds", "uorf"))) {
+      needs_rnase_extension <- !is.null(rnase_bias[["RFP"]]) &&
+        (region %in% c("cds", "uorf")) && region_uses_dmn &&
+        rnase_kernel_reach(rnase_bias) > 0L
+      # A non-DMN libtype sharing this region's (possibly RNase-extended)
+      # dt_range never applies rnase_bias itself, so its MN branch in
+      # nt_coverage_all_regions() zero-pads its own sample vector by this
+      # same reach at both ends of every gene (matching the prefix/original/
+      # suffix row layout append_rnase_to_dt()/append_rnase_to_simulated_rpf_
+      # table() both produce) instead of contributing invented smeared reads
+      # to the flanking positions it doesn't model.
+      assign(
+        paste0("region_rnase_reach_", region),
+        if (needs_rnase_extension) rnase_kernel_reach(rnase_bias) else 0L
+      )
+      if (needs_rnase_extension) {
         if (is.null(dt_range$genes)) {
           dt_range[, genes := groupings(tile)]
           dt_range[, position := seq_len(.N), by = genes]
