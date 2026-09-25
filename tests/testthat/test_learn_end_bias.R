@@ -149,3 +149,55 @@ test_that("two-base motifs can be fit without inventing unsupported enrichment",
   expect_equal(relative_end_weight(fit$three_prime_bias, "TC", "AA"), 2, tolerance = .03)
   expect_error(fit_end_preferences(data, 2, FALSE, 1, 1), "converge")
 })
+
+test_that("the dmn_alpha in-frame-fraction diagnostic ignores off-transcript reads and never rescales", {
+  # An earlier version divided the raw dmn_alpha_scale estimate by this
+  # fraction, reasoning that reads excluded for landing off the exact codon
+  # boundary would otherwise bias the moment estimator low. That was
+  # reverted after independent review showed MOM concentration estimates
+  # are essentially unaffected by uniform random read thinning, so "divide
+  # by the excluded fraction" has no general justification -- this is now
+  # diagnostic only (dispersion$scale is never touched) and its denominator
+  # is restricted to reads actually overlapping a modeled transcript.
+  models <- list(tx1 = list(
+    exons = GenomicRanges::GRanges("chr1", IRanges::IRanges(1000, 2000), strand = "+")
+  ))
+  dispersion <- list(scale = 0.065, diagnostics = NULL, sites = NULL)
+  reads <- data.table::data.table(
+    chromosome = c("chr1", "chr1", "chr1", "chr1", "chr1"),
+    position = c(1100L, 1200L, 5000L, 1300L, 900L),
+    strand = c("+", "+", "+", "+", "+"),
+    # The last read's aligned blocks (900-913 and 2014-2027, skipping the
+    # 1100 nt intron) never touch the exon (1000-2000) even though its
+    # full reference span (900-2027) would appear to -- must not count.
+    cigar = c("28M", "28M", "28M", "30M", "14M1100N14M"),
+    fragment_length = c(28L, 28L, 28L, 30L, 28L),  # length 30 is unsupported
+    count = c(10L, 5L, 100L, 999L, 100L)
+  )
+  distribution <- data.table::data.table(fragment_length = 28L)
+  # Of the length-28 (supported) reads, only positions 1100 and 1200
+  # overlap the modeled transcript (count 10 + 5 = 15); position 5000 and
+  # the spliced read at 900 are excluded from the denominator despite
+  # having a supported length. "used" = 10 (only the position-1100 read
+  # was on the exact codon boundary and usable).
+  count_diagnostics <- c(used = 10L, unmatched_or_ambiguous = 5L + 100L + 999L + 100L)
+
+  result <- correct_dmn_alpha_scale_for_smearing(
+    dispersion, reads, distribution, count_diagnostics, models
+  )
+  expect_equal(result$raw_scale, 0.065)
+  expect_equal(result$scale, 0.065)  # never rescaled
+  expect_equal(result$in_frame_fraction, 10 / 15)
+})
+
+test_that("learn_end_bias() does not correct dmn_alpha_scale when nothing was excluded", {
+  # The main fixture (see the first test in this file) has zero
+  # unmatched_or_ambiguous reads -- every usable read is exactly in-frame --
+  # so the correction must be a no-op there.
+  fixture <- make_end_learning_fixture()
+  set.seed(212)
+  bam <- make_learning_bam(fixture)
+  fit <- fit_learning_fixture(fixture, bam)
+  expect_equal(fit$diagnostics$dmn_alpha_in_frame_fraction, 1)
+  expect_equal(fit$diagnostics$dmn_alpha_raw_scale, fit$dmn_alpha_scale)
+})

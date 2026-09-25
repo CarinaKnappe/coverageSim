@@ -69,6 +69,15 @@ A list containing five_prime_bias, three_prime_bias, codon_bias and
   M/=/X/N alignments unambiguously compatible with one supplied transcript,
   with the reference site on a CDS codon boundary, are used. Soft clips,
   indels, ambiguous reference bases and boundary-adjusted offsets are excluded.
+  Because only in-frame reads are usable this way, the fraction of reads
+  (with a supported fragment length) that actually landed on the exact
+  codon boundary is kept in diagnostics$dmn_alpha_in_frame_fraction, and
+  the raw dmn_alpha_scale moment estimate in
+  diagnostics$dmn_alpha_raw_scale (currently identical to dmn_alpha_scale
+  itself -- no automatic correction for a low in-frame fraction is
+  applied, since dividing by it has no general statistical justification;
+  see correct_dmn_alpha_scale_for_smearing()'s comment for why an earlier
+  version doing that was reverted).
 }
 \description{
 Fits a regularized conditional multinomial model to observed and possible

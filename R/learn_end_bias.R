@@ -39,6 +39,15 @@
 #'   M/=/X/N alignments unambiguously compatible with one supplied transcript,
 #'   with the reference site on a CDS codon boundary, are used. Soft clips,
 #'   indels, ambiguous reference bases and boundary-adjusted offsets are excluded.
+#'   Because only in-frame reads are usable this way, the fraction of reads
+#'   (with a supported fragment length) that actually landed on the exact
+#'   codon boundary is kept in diagnostics$dmn_alpha_in_frame_fraction, and
+#'   the raw dmn_alpha_scale moment estimate in
+#'   diagnostics$dmn_alpha_raw_scale (currently identical to dmn_alpha_scale
+#'   itself -- no automatic correction for a low in-frame fraction is
+#'   applied, since dividing by it has no general statistical justification;
+#'   see correct_dmn_alpha_scale_for_smearing()'s comment for why an earlier
+#'   version doing that was reverted).
 #' @export
 learn_end_bias <- function(bam, fasta, transcripts, cds, fragment_geometry,
                            k = 1L, by_length = FALSE, min_mapq = 20,
@@ -73,6 +82,9 @@ learn_end_bias <- function(bam, fasta, transcripts, cds, fragment_geometry,
   dispersion <- estimate_dmn_alpha_from_opportunities(
     counted$data, fit, dmn_min_reads, dmn_min_sites
   )
+  dispersion <- correct_dmn_alpha_scale_for_smearing(
+    dispersion, observed$reads, distribution, counted$diagnostics, models
+  )
   structure <- learn_coverage_structure(dispersion$sites, acf_max_lag)
   fit$dmn_alpha_scale <- dispersion$scale
   fit$auto_correlation <- structure$kernel
@@ -83,6 +95,8 @@ learn_end_bias <- function(bam, fasta, transcripts, cds, fragment_geometry,
   fit$codon_bias <- learned_length_codon_bias(fit$diagnostics$codon_weights)
   fit$frame_bias <- frame_fit$profile
   fit$diagnostics$dmn_alpha <- dispersion$diagnostics
+  fit$diagnostics$dmn_alpha_raw_scale <- dispersion$raw_scale
+  fit$diagnostics$dmn_alpha_in_frame_fraction <- dispersion$in_frame_fraction
   fit$diagnostics$auto_correlation <- structure$acf
   fit$diagnostics$frame_counts <- frame_fit$diagnostics
   fit$diagnostics$reads <- c(observed$diagnostics, counted$diagnostics)
@@ -270,6 +284,54 @@ estimate_dmn_alpha_from_opportunities <- function(opportunities, fit,
     scale <- stats::median(usable)
   }
   list(scale = scale, diagnostics = diagnostics, sites = sites)
+}
+
+# The moment estimator above only ever sees reads that land exactly on a
+# CDS codon boundary (end_learning_opportunities()/count_end_learning_reads()
+# silently drop everything else as "unmatched"). This reports, as a
+# diagnostic only, what share of reads with a supported fragment length were
+# usable this way -- it does NOT rescale dmn_alpha_scale by it. An earlier
+# version divided the raw scale by this fraction, reasoning that excluding
+# off-frame reads removes exactly the ones that would show the most
+# smearing-driven variance. That was disproven on independent review: MOM
+# concentration estimates are essentially unaffected by uniform random
+# read thinning (verified directly -- discarding 50% of reads independently
+# of the underlying rate barely moved the estimate, e.g. 0.337 -> 0.348 in
+# one check), so "divide by the fraction excluded" has no general
+# justification, even though it happened to roughly match one specific
+# simulated-RNase-kernel test case. Properly correcting for real smearing
+# would need to model how the specific kernel reshapes the in-frame
+# subset's own concentration, not a single scalar division -- left for a
+# follow-up once that's derived and verified, not shipped as a guess.
+#
+# The denominator is restricted to reads of a supported length that
+# actually overlap one of the modeled transcripts (matching strand) -- on a
+# genome-wide BAM, most reads belong to genes that were never candidates
+# for count_end_learning_reads() at all (a different gene entirely, not a
+# few nt off some codon boundary), and including them would inflate the
+# denominator with reads that have nothing to do with in-frame vs.
+# off-frame smearing. Built via GAlignments/grglist() (per-read aligned
+# blocks, one GRanges per read skipping any introns) rather than a single
+# start-to-end span per read: a naive span would treat a spliced read's
+# skipped intron as part of its footprint, so a read whose aligned blocks
+# never actually touch a transcript could still "overlap" it purely
+# because the transcript happens to fall inside the intron gap.
+correct_dmn_alpha_scale_for_smearing <- function(dispersion, reads, distribution,
+                                                  count_diagnostics, models) {
+  candidates <- reads[fragment_length %in% distribution$fragment_length]
+  supported <- if (nrow(candidates)) {
+    exons <- GenomicRanges::reduce(do.call(c, unname(lapply(models, `[[`, "exons"))))
+    read_blocks <- GenomicAlignments::grglist(GenomicAlignments::GAlignments(
+      seqnames = candidates$chromosome, pos = candidates$position,
+      cigar = candidates$cigar, strand = candidates$strand
+    ))
+    on_transcript <- IRanges::overlapsAny(read_blocks, exons, ignore.strand = FALSE)
+    sum(candidates$count[on_transcript])
+  } else 0
+  in_frame_fraction <- if (supported > 0) count_diagnostics[["used"]] / supported else NA_real_
+  dispersion$raw_scale <- dispersion$scale
+  dispersion$in_frame_fraction <- in_frame_fraction
+  dispersion
 }
 
 learn_coverage_structure <- function(sites, max_lag) {
