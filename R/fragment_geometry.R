@@ -455,12 +455,6 @@ transcript_fragment_alignment <- function(model, transcript_start,
   )
 }
 
-has_active_end_bias <- function(geometry) {
-  any(vapply(geometry[c("five_prime_bias", "three_prime_bias")], function(bias) {
-    !is.null(bias$table) && bias$strength > 0
-  }, logical(1)))
-}
-
 has_active_fragment_bias <- function(geometry) {
   bias_names <- c("five_prime_bias", "three_prime_bias", "codon_bias", "frame_bias")
   any(vapply(geometry[bias_names], function(bias) {

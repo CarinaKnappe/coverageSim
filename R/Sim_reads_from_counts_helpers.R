@@ -271,8 +271,6 @@ input_validation_controller <- function() {
       } else {
         uorf_ranges <- true_uorf_ranges
       }
-      uorf_gene_grouping <- chmatch(txNames(uorf_ranges),
-                                    rownames(assay(count_table, "uorf")))
       if (any((widthPerGroup(uorf_ranges, FALSE) %% 3) != 0)) {
         warning("Detected uORF ranges that ends on incomplete codon (is not %% 3 == 0 in length")
       }
@@ -383,95 +381,6 @@ sequence_table_controller <- function() {
       assign(paste0("seq_alpha_list_", region), alpha_matrix)
       assign(paste0("dt_", region), dt_range)
     }})
-}
-
-nt_coverage_all_regions_old <- function(count_table_regions, libClass, assay,
-                                    ideal_coverage,
-                                    rnase_bias, auto_correlation,
-                                    read_lengths_per, uorf_ranges,
-                                    uorf_prop_mode, debug_coverage) {
-  data.table::rbindlist(lapply(regionsToSample, function(region) {
-    region_counts <- dt[, region]
-
-    if (sum(region_counts) > 0) {
-      lengths <- get(paste0("lengths_", region))
-
-      if (region == "uorf") {
-        region_counts <-  distribute_reads_to_uORFs(region_counts, assay,
-                                                    uorf_ranges, uorf_prop_mode)
-      }
-      region_ranges <- get(paste0(region, "_ranges"), mode = "S4")
-      dt_region <- copy(get(paste0("dt_", region)))
-      ideal_cov <- ideal_coverage[[region]][[libtype]] # skew_cov
-      auto_cor <- auto_correlation[[region]][[libtype]] # bump_shape
-      read_lengths <- unlist(read_lengths_per[libtype], use.names = FALSE)
-      if (debug_coverage) browser()
-      if (!is(ideal_coverage, "call")) {
-        # Initial division of counts per codon
-
-        alpha_matrix <- get(paste0("seq_alpha_matrix_", region))
-        seq_lengths <- lengths/3
-        res <- if (!is.null(alpha_matrix)) {
-          split_prop <- if (region == "uorf") {groupings(seasonality)} else dt_region$genes
-          # Bias by codon
-          seq_bias <- extraDistr::rdirmnom(n = nrow(alpha_matrix),
-                                           size = region_counts,
-                                           alpha = alpha_matrix)
-          seq_bias_t <- t(seq_bias)[t(alpha_matrix) != 1e-24]
-
-          split(seq_bias_skewed, split_prop)
-        } else if (length(skew_cov) != 1) {
-          skew_alpha <- if (is(skew_cov, "data.frame")) {
-            stopifnot(nrow(skew_cov) == 3)
-            skew_cov$alpha
-          } else {
-            stopifnot(length(skew_cov) == 3 & is.numeric(skew_cov))
-            skew_cov
-          }
-          seq_bias_skewed <- extraDistr::rdirmnom(n = sum(seq_lengths),
-                                                  size = 100,
-                                                  alpha = skew_alpha)
-          seq_bias_skewed <- as.vector(t(seq_bias_skewed))
-          split(seq_bias_skewed, split_prop)
-        } else NULL
-
-
-        use_trend <- is.call(bump_shape)
-        if (use_trend) {
-          b <- sample(seq(3,15, by = 0.1), size = length(lengths), replace = TRUE)
-          pi_s <- sample(pi*seq(5), prob = 1/seq(5), size = length(lengths), replace = TRUE)
-          periods <-  lapply(seq_along(lengths), function(i) seq(0, pi_s[i], pi_s[i]/lengths[i]))
-          trend <- lapply(seq_along(lengths),
-                          function(i, l = lengths[i], x = periods[[i]])
-                            rep_len(eval(bump_shape), l))
-          trend <- lapply(trend, function(shape) shape / max(shape))
-          res <- if (is.null(res)) {
-            trend
-          } else split(unlist(res, use.names = F) * unlist(trend, use.names=F),
-                       groupings(res))
-        }
-        cov <- lapply(seq_along(region_ranges),
-                      function(x) a <- as.vector(rmultinom(1, region_counts[x], res[[x]] + 1e-24)))
-      } else {
-        cov <- lapply(seq_along(region_ranges),
-                      function(y, res, x = lengths[y]) a <- as.vector(rmultinom(1, region_counts[y], eval(res))),
-                      res = res)
-      }
-      dt_region <- dt_region[, !(colnames(dt_region) %in% c("AA", "genes", "position", "proportion")), with = FALSE]
-      dt_region[, score := unlist(cov, use.names = FALSE)]
-      if (libClass == "GRanges") {
-        if (length(read_lengths) == 1) {
-          dt_region[, size := sample(rep(read_lengths, .N), size = .N, replace = TRUE)]
-        } else dt_region[, size := sample(read_lengths, size = .N, replace = TRUE)]
-
-      } else {
-        if (length(read_lengths) == 1) {
-          dt_region[, cigar := paste0(sample(rep(read_lengths, .N), size = .N, replace = TRUE), "M")]
-        } else dt_region[, cigar := paste0(sample(read_lengths, size = .N, replace = TRUE), "M")]
-      }
-    } else dt_region <- data.table::data.table()
-    return(dt_region)
-  }))
 }
 
 validate_sequence_profile <- function(seq_bias) {
@@ -747,22 +656,6 @@ shapes <- function(i = 3, Z = 0.1, v = 1) {
     res <- bquote(autocor_window(alpha_vec, .(i), padding.rm = T))
   }
   return(res)
-}
-
-reset_matrix <- function(res_matrix, alpha_matrix, lengths) {
-  alpha_mat_3 <- alpha_matrix[, rep(seq(ncol(alpha_matrix)), each=3)]
-  flank <- (ncol(res_matrix) - ncol(alpha_mat_3))/2
-  if (flank < 0) stop("flank < 0, report this error on github!")
-  if (flank > 0) {
-    alpha_mat_3 <- cbind(alpha_mat_3[, rep(1, flank)],
-                         alpha_mat_3, alpha_mat_3[, rep(ncol(alpha_mat_3), flank)])
-    all_lengths <- rep(lengths, each = flank) + seq(flank) + flank
-    for (i in seq(nrow(alpha_mat_3))) {
-      index <- i*3 -3 + 1
-      alpha_mat_3[i, all_lengths[seq(index, index+2)]] <- rep(1, flank)
-    }
-  }
-  return(alpha_mat_3)
 }
 
 # Sequence lengths for SAM/BAM headers: use the reference FASTA where the

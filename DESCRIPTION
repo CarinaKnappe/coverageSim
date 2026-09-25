@@ -2,16 +2,16 @@ Package: coverageSim
 Type: Package
 Title: Simulation of count tables and nucleotide precision NGS data
 Version: 0.1.0
-Author: c(
-    person(given = "Haakon", family = "Tjeldnes", email = "hauken_heyken@hotmail.com", role = c("aut","ctb")))
-Maintainer: The package maintainer <yourself@somewhere.net>
-Description: Simulation of count tables and nucleotide precision NGS data 
+Authors@R: c(
+    person(given = "Haakon", family = "Tjeldnes", email = "hauken_heyken@hotmail.com", role = "aut"),
+    person(given = "Carina", family = "Knappe", email = "carina.knappe@ibv.uio.no", role = c("aut", "cre")))
+Description: Simulation of count tables and nucleotide precision NGS data
  through parameter estimation and auto correlation modelling.
 License: MIT + file LICENSE
 Encoding: UTF-8
 LazyData: true
-BugReports: https://github.com/m-swirski/RiboCrypt/issues
-URL: https://github.com/m-swirski/RiboCrypt
+BugReports: https://github.com/CarinaKnappe/coverageSim/issues
+URL: https://github.com/CarinaKnappe/coverageSim
 Depends:
   R (>= 3.6.0),
   ORFik (>= 1.13.12),

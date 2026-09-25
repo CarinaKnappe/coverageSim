@@ -596,7 +596,7 @@ create_uORFs <- function(leader_string, chromosome_seqs, n,
     }
   }
   # Fix uORFs that now got new internal stop codons
-  print("Fixing uORF internal stop --")
+  message("Fixing uORF internal stop --")
   new_uorf_string <- chromosome_seqs[uorf_ranges]
   internal_inframe_stops <- 3 + (start(Biostrings::vmatchPattern("*", heads(translate(new_uorf_string), -1))) - 1)*3
   if(!all(lengths(internal_inframe_stops) == 0)) {
@@ -604,7 +604,7 @@ create_uORFs <- function(leader_string, chromosome_seqs, n,
       chromosome_seqs, uorf_ranges, internal_inframe_stops
     )
   }
-  print("uORF internal stop done")
+  message("uORF internal stop done")
   # uORF sanity tests
   total_stops <- alphabetFrequency(translate(chromosome_seqs[uorf_ranges]))[,"*"]
   start_debug <- FALSE
@@ -633,7 +633,6 @@ create_uORFs <- function(leader_string, chromosome_seqs, n,
 create_uorf_ranges <- function(leader_string, uorf_max_length, max_uorfs,
                                uorfs_can_overlap_cds, uorfs_can_overlap) {
   message("- Making valid uORFs ranges")
-  removed_start_area <-
   uorf_ranges <- IRangesList(lapply(nchar(leader_string), function(size) {
     all_uorfs <- IRanges()
     # Not allow to start overlapping CDS ATG, or inframe of CDS

@@ -101,41 +101,6 @@ translate_orf_seq <- function(cds, faFile, is.sorted = TRUE,
   return(seqs)
 }
 
-# NOTE: overlap_props() was removed here (2026-09-18). It referenced an
-# undefined global `df` (an ORFik experiment object was clearly intended,
-# but never passed as a parameter), so it errored on every call unless a
-# `df` happened to exist by coincidence in the calling environment. It was
-# unused anywhere else in this package, in the test suite, or in the
-# rust_helpers/choros scripts, and was pre-existing article/figure code
-# (not part of the simulation pipeline) rather than a Carina change. See
-# claude/code-review-carina-dev-2026-09.md in the CoverageSimulator Claude
-# project for details. Run `devtools::document()` to regenerate NAMESPACE
-# and remove man/overlap_props.Rd accordingly.
-
-# NOTE (2026-09-19): Estimators.R was split into "pipeline-relevant" vs.
-# "article/figure code" (see claude/code-review-carina-dev-2026-09.md,
-# section "Estimators.R"). Removed here as unused, unexported, and with no
-# remaining callers in this package, the test suite, or the choros/rust
-# scripts: dispersion_test(), GENETIC_CODE_ORFik() (note: despite the
-# similar name it was never actually used by translate_orf_seq() above --
-# that function's default genetic.code argument resolves to
-# Biostrings::GENETIC_CODE, not this one), seq_usage(), AA_score() (its only
-# caller), coverage_all_cds_all_samples(), get_lower_tri(), cor_upper_tri()
-# (itself dead/buggy code -- computed `cor` but never used it),
-# auto_correlation_genes_all() and its only caller-less helper
-# ac_list_to_dt(), period_detector(), and skewness(). Also removed in a
-# second pass the same day: auto_correlation(), auto_correlation_fast(), and
-# their only dependencies coverage_cor() and get_upper_tri() -- none of the
-# four were exported or called anywhere in the package/tests/choros/rust
-# scripts. They are unrelated to the actual autocorrelation bias model used
-# by the simulation pipeline, which lives entirely in
-# Sim_reads_from_counts_helpers.R / learn_end_bias.R / Sim_reads_from_counts.R
-# as the `auto_correlation` parameter/kernel -- a different code path,
-# untouched by this. None of the removed functions had roxygen documentation
-# or @export, so no NAMESPACE/man/ regeneration is needed. Full removed code
-# is preserved in git history (`git log -p -- R/Estimators.R`) if any of it
-# is needed later for the separate article-code repo.
-
 #' Get gene auto correlation
 #' @param dt a data.table of counts
 #' @param dist numeric, default 6. Distance in nt or codons to check
