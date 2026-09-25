@@ -155,6 +155,22 @@ simCountTables <- function (n = 500, libtypes = c("RFP", "RNA", "CAGE", "PAS"),
 #' @param sampling named list of sampling modes per library type, default:
 #' c(RFP = "MN", RNA = "MN", CAGE = "MN", PAS = "MN"), where MN is multinomial, alternative is
 #' DMN (Dirichlet-multinomial)
+#' @param region_dmn_concentration numeric > 0, default 1. Only affects
+#'   libraries sampled with DMN. Scales the Dirichlet-multinomial's alpha
+#'   vector (the region proportions, which sum to 1, so this value is also
+#'   alpha0 at the default): larger values shrink how much a single draw's
+#'   region proportions can stray from \code{region_proportion} (approaching
+#'   MN as concentration grows), smaller values widen it (more draws put
+#'   most or all reads into a single region). At a low enough concentration
+#'   (roughly below 0.005, depending on \code{region_proportion}), some
+#'   genes' draws hit the degenerate limit where a single random region
+#'   (chosen with probability equal to its own \code{region_proportion}, so
+#'   e.g. cds still "wins" more often than leader/trailer whenever its
+#'   proportion is larger) gets that gene's entire read count -- a real,
+#'   rare, but deliberately extreme scenario for stress-testing downstream
+#'   tools, not something that happens at ordinary concentration values.
+#'   Left at the default 1, this reproduces the original, unscaled DMN
+#'   behavior.
 #' @return a rangedSummarizedExperiment
 #' @export
 #' @examples
@@ -173,10 +189,13 @@ simCountTablesRegions <- function(count_table = simCountTables(),
                                          cds =     list(RFP = 0.75, RNA = 0.4, CAGE = 0, PAS = 0),
                                          trailer = list(RFP = 0.1, RNA = 0.3, CAGE = 0, PAS = 1),
                                          uorf =    list(RFP = 0.1, RNA = 0,   CAGE = 0, PAS = 0)),
-                                  sampling = c(RFP = "MN", RNA = "MN", CAGE = "MN", PAS = "MN")) {
+                                  sampling = c(RFP = "MN", RNA = "MN", CAGE = "MN", PAS = "MN"),
+                                  region_dmn_concentration = 1) {
   stopifnot(is(count_table, "SummarizedExperiment"))
   message("Simulating region count tables -")
   stopifnot(all(sampling %in% c("MN", "DMN")))
+  stopifnot(is.numeric(region_dmn_concentration), length(region_dmn_concentration) == 1L,
+           is.finite(region_dmn_concentration), region_dmn_concentration > 0)
   prop_regions <- names(region_proportion)
   all_allowed_regions <- c("leader", "cds", "trailer", "uorf")
   stopifnot(all(regionsToSample %in% all_allowed_regions))
@@ -198,7 +217,7 @@ simCountTablesRegions <- function(count_table = simCountTables(),
         rmultinom(1, x, prob = prop_mat[,libtype]))))
     } else {
       dt <- t(as.data.table(lapply(assay[,s], function(x)
-        sample_region_counts_dmn(x, prop_mat[,libtype]))))
+        sample_region_counts_dmn(x, prop_mat[,libtype], region_dmn_concentration))))
     }
     colnames(dt) <- names(region_proportion)
     mat <-cbind(mat, dt)
@@ -231,16 +250,45 @@ count_design_matrix <- function(colData, libtypes, conditions) {
 }
 
 # Dirichlet-multinomial draw over regions. Regions with proportion 0 receive no
-# reads (a zero Dirichlet parameter is invalid).
-sample_region_counts_dmn <- function(size, proportions) {
+# reads (a zero Dirichlet parameter is invalid). `concentration` scales the
+# alpha vector (proportions sum to 1, so it's also the Dirichlet's total
+# concentration alpha0 at the default concentration = 1): larger values
+# shrink the draw-to-draw spread of region proportions towards the plain
+# multinomial (MN) case, smaller values widen it, down to and including the
+# degenerate "one random region gets everything" extreme at a very low
+# concentration (see the fallback below). Left at 1, this is unchanged from
+# the original behavior.
+sample_region_counts_dmn <- function(size, proportions, concentration = 1) {
   stopifnot(all(is.finite(proportions)), all(proportions >= 0))
+  stopifnot(is.numeric(concentration), length(concentration) == 1L,
+           is.finite(concentration), concentration > 0)
   counts <- numeric(length(proportions))
   positive <- proportions > 0
   if (sum(positive) == 1L) {
     counts[positive] <- size
   } else {
-    counts[positive] <- as.vector(extraDistr::rdirmnom(n = 1, size = size,
-                                                       alpha = proportions[positive]))
+    alpha <- proportions[positive] * concentration
+    drawn <- as.vector(extraDistr::rdirmnom(n = 1, size = size, alpha = alpha))
+    # At a very small concentration (alpha close to 0), rdirmnom()'s
+    # internal Gamma draws can all underflow to exactly 0, so normalizing
+    # them divides 0 by 0 (NaN) instead of drawing a valid outcome. The
+    # mathematically correct limit of a Dirichlet(alpha) draw as
+    # concentration -> 0 is degenerate: all mass falls on a single
+    # category, chosen with probability equal to its own share of
+    # `proportions` among the candidates. Falling back to exactly that
+    # (instead of erroring) lets a deliberately extreme concentration still
+    # express "this gene's reads all land in one region" -- rare, and only
+    # reachable this way, but not a numerical crash -- while still
+    # respecting the same region weighting as everywhere else (e.g. cds
+    # "wins" this degenerate draw more often than leader/trailer whenever
+    # its own proportion is larger, matching ordinary biological
+    # expectation rather than picking a region uniformly at random).
+    if (anyNA(drawn) || any(drawn < 0) || sum(drawn) != size) {
+      winner <- sample.int(length(alpha), 1L, prob = proportions[positive])
+      drawn <- rep(0, length(alpha))
+      drawn[winner] <- size
+    }
+    counts[positive] <- drawn
   }
   counts
 }

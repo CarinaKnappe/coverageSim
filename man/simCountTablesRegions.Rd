@@ -11,7 +11,8 @@ simCountTablesRegions(
   region_proportion = list(leader = list(RFP = 0.05, RNA = 0.3, CAGE = 1, PAS = 0), cds =
     list(RFP = 0.75, RNA = 0.4, CAGE = 0, PAS = 0), trailer = list(RFP = 0.1, RNA = 0.3,
     CAGE = 0, PAS = 1), uorf = list(RFP = 0.1, RNA = 0, CAGE = 0, PAS = 0)),
-  sampling = c(RFP = "MN", RNA = "MN", CAGE = "MN", PAS = "MN")
+  sampling = c(RFP = "MN", RNA = "MN", CAGE = "MN", PAS = "MN"),
+  region_dmn_concentration = 1
 )
 }
 \arguments{
@@ -29,6 +30,23 @@ uorf =    list(RFP = 0.1, RNA = 0,   CAGE = 0, PAS = 0))}}
 \item{sampling}{named list of sampling modes per library type, default:
 c(RFP = "MN", RNA = "MN", CAGE = "MN", PAS = "MN"), where MN is multinomial, alternative is
 DMN (Dirichlet-multinomial)}
+
+\item{region_dmn_concentration}{numeric > 0, default 1. Only affects
+libraries sampled with DMN. Scales the Dirichlet-multinomial's alpha
+vector (the region proportions, which sum to 1, so this value is also
+alpha0 at the default): larger values shrink how much a single draw's
+region proportions can stray from \code{region_proportion} (approaching
+MN as concentration grows), smaller values widen it (more draws put
+most or all reads into a single region). At a low enough concentration
+(roughly below 0.005, depending on \code{region_proportion}), some
+genes' draws hit the degenerate limit where a single random region
+(chosen with probability equal to its own \code{region_proportion}, so
+e.g. cds still "wins" more often than leader/trailer whenever its
+proportion is larger) gets that gene's entire read count -- a real,
+rare, but deliberately extreme scenario for stress-testing downstream
+tools, not something that happens at ordinary concentration values.
+Left at the default 1, this reproduces the original, unscaled DMN
+behavior.}
 }
 \value{
 a rangedSummarizedExperiment
