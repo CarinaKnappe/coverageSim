@@ -630,32 +630,28 @@ append_rnase_to_dt <- function(dt_range, lengths, rnase_bias) {
 
 #' Get shape function
 #'
-#' Either uniform 0 (null model), cosine signals 1-4 or
-#' rolling windows with auto correlation max.lag 'i'
-#' @param i integer index of default shapes to get,
-#'  default is 3. Which returns a a function using 3 cosings.
-#' @param Z integer, default 0.1. For cosine shapes,
-#'  the zero inflation scaler,  the avoid 0 probability positions
-#' @param v numeric, default 1. For cosine shapes, scales the first
-#' order cosine by the power of 'v'
-#' @return a quote object to be evaluated inside the coverage function
+#' Returns a quoted expression describing the codon-level autocorrelation
+#' smoothing applied along a gene: a rolling window (\code{autocor_window()},
+#' width \code{2*i + 1}, its \code{max.lag} argument) that locally correlates
+#' neighboring codon-bias values, modeling real tRNA/wobble-position sharing
+#' between nearby codons -- confirmed against the manuscript's own
+#' autocorrelation formula. Larger \code{i} smooths over a wider
+#' neighborhood, which matters most for sparsely sampled genes: at low read
+#' depth it noticeably increases how much reads cluster into a few
+#' positions rather than spreading out (higher skew and peak-to-median
+#' ratio), while at high read depth the effect is negligible.
+#' @param i integer, default 9 (the same default \code{simNGScoverage()}
+#'  itself uses). Half-width of the local autocorrelation smoothing window
+#'  (the full window is \code{2*i + 1} codons). \code{i = 0} disables only
+#'  this smoothing step; codon bias and RNase-kernel processing elsewhere
+#'  in the pipeline still apply, so this alone does not produce a fully
+#'  uniform coverage model.
+#' @return a quote object to be evaluated inside the coverage function, or
+#'  NULL when \code{i = 0}.
 #' @export
-shapes <- function(i = 3, Z = 0.1, v = 1) {
-  if (i == 0) {
-    res <- NULL
-  } else if (i == 1) {
-    #quote(abs(cos(seq(0, pi*(x/30), pi/30))) + 0.1)
-    res <- bquote(abs(cos(x))^.(v) + .(Z))
-  } else if (i == 2) {
-    res <- bquote((abs(cos(x)) + abs(cos(x*b[i])))^.(v) + .(Z))
-  } else if (i == 3) {
-    res <- bquote((abs(cos(x)) + abs(cos(x*b[i])) + abs(cos(x*(b[i]^2))))^.(v) + .(Z))
-  } else if (i == 4) {
-    res <-bquote(abs(cos(seq(0, pi*(l/30), pi/30))) + .(Z))
-  } else {
-    res <- bquote(autocor_window(alpha_vec, .(i), padding.rm = T))
-  }
-  return(res)
+shapes <- function(i = 9) {
+  if (i == 0) return(NULL)
+  bquote(autocor_window(alpha_vec, .(i), padding.rm = T))
 }
 
 # Sequence lengths for SAM/BAM headers: use the reference FASTA where the
