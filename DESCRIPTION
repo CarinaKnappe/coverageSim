@@ -28,6 +28,7 @@ Imports:
   GenomicFeatures,
   GenomicRanges,
   ggplot2,
+  grid,
   gridExtra,
   IRanges,
   htmlwidgets,

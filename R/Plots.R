@@ -25,6 +25,8 @@ coverage_plot <- function(cov, y_breaks, plot.margin) {
 #' @param x_lab ggplot x label, default: "Position"
 #' @param plot.margin margin(0, 0, 0, 0, "cm")
 #' @return a ggplot object
+#' @import ggplot2
+#' @importFrom grid unit
 #' @export
 ORF_frame_plot_window <- function(tx_window, sim_reads, uORFs,
                                   cds_region = startRegion(cds_RPL, upstream = 0, downstream = 100),
