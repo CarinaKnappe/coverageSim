@@ -73,7 +73,14 @@ distributed among chromosomes. Must have one positive value per chromosome.}
 
 \item{start_codons}{= "ATG",}
 
-\item{stop_codons}{= c("TAG", "TGA", "TAA"),}
+\item{stop_codons}{= c("TAG", "TGA", "TAA"), a non-empty subset (no
+duplicates) of the standard genetic code's three stop codons. Use a
+smaller subset to simulate stop-codon usage bias (e.g. \code{"TGA"}
+alone). Codons outside \code{c("TAG", "TGA", "TAA")} are not supported:
+the CDS/uORF integrity checks rely on \code{Biostrings::translate()}'s
+default (standard) genetic code to recognize stops, so simulating an
+organism/organelle with a different genetic code (e.g. mitochondrial,
+where TGA is not a stop) is out of scope here.}
 
 \item{max_uorfs}{= 1,}
 

@@ -37,7 +37,16 @@ genome_input_test_controller <- function() {
     stopifnot(length(uorfs_can_overlap_cds) == 1)
     stopifnot(uorfs_can_overlap_cds %in% seq(0, 2))
     stopifnot(min(cds_length) >= 9 & min(cds_length) > cds_exons & (min(cds_length) >= uorf_max_length + 3))
-    stopifnot(identical(sort(stop_codons), sort(c("TAG", "TGA", "TAA"))))
+    # A non-empty subset of the three real stop codons -- not just the full
+    # set of all three -- so stop-codon usage bias (real organisms/genes do
+    # prefer some of TAA/TAG/TGA over others) can be simulated. Restricted
+    # to the standard genetic code's own stop codons (not arbitrary
+    # strings) because the CDS/uORF integrity checks below rely on
+    # Biostrings::translate()'s default (standard) genetic code to reliably
+    # recognize them as stops; a different code entirely (e.g. mitochondrial,
+    # where TGA is not a stop) is not supported.
+    stopifnot(length(stop_codons) >= 1, !anyDuplicated(stop_codons),
+             all(stop_codons %in% c("TAG", "TGA", "TAA")))
     })
 }
 

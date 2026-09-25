@@ -32,7 +32,14 @@
 #' @param flank_length = 305,
 #' @param strand = c("+", sample(c("+", "-"), n-1, replace = T)),
 #' @param start_codons = "ATG",
-#' @param stop_codons = c("TAG", "TGA", "TAA"),
+#' @param stop_codons = c("TAG", "TGA", "TAA"), a non-empty subset (no
+#'   duplicates) of the standard genetic code's three stop codons. Use a
+#'   smaller subset to simulate stop-codon usage bias (e.g. \code{"TGA"}
+#'   alone). Codons outside \code{c("TAG", "TGA", "TAA")} are not supported:
+#'   the CDS/uORF integrity checks rely on \code{Biostrings::translate()}'s
+#'   default (standard) genetic code to recognize stops, so simulating an
+#'   organism/organelle with a different genetic code (e.g. mitochondrial,
+#'   where TGA is not a stop) is out of scope here.
 #' @param max_uorfs = 1,
 #' @param uorfs_can_overlap = TRUE,
 #' @param uorfs_can_overlap_cds = TRUE, logical/integer, 0/FALSE is no overlap, 1/TRUE is can overlap
