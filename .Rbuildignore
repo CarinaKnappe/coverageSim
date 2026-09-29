@@ -3,3 +3,8 @@
 ^\.github$
 ^AGENTS\.md$
 ^CLAUDE\.md$
+^rust_helpers$
+^choros$
+^git_ignore$
+^\.agents$
+^CoverageSim_manuscript.*\.pdf$
