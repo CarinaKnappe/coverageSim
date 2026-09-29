@@ -7,3 +7,7 @@
 ^git_ignore$
 ^\.agents$
 ^CoverageSim_manuscript.*\.pdf$
+^BSgenome\.Human\.test\.genc2522M$
+^test_human\.2bit
+^test_human\.gtf$
+^test_output\.txt$
