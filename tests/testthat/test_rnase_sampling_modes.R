@@ -89,6 +89,86 @@ test_that("a scalar RNase kernel permits active mixed sampling modes", {
                c(8000, 8000))
 })
 
+test_that("a region-nested rnase_bias is rejected instead of silently disabling the kernel", {
+  # rnase_bias is keyed by library type, but ideal_coverage, auto_correlation,
+  # sampling and simCountTablesRegions()'s region_proportion are all nested by
+  # region, so the nested shape is an easy mistake. It used to pass silently:
+  # rnase_bias[["RFP"]] was NULL, so no region was RNase-extended and
+  # sim_sequence_bias() ran with rnase_acf = NULL. Measured on 4 genes with
+  # cds-only DMN, that collapsed the reading-frame distribution from 49/13/13
+  # to 68/0/0 and removed every read outside the CDS -- i.e. it quietly dropped
+  # the manuscript's ~5:1:2 frame ratio, with no error and no warning.
+  nested <- list(
+    leader = list(RFP = 1),
+    cds = list(RFP = c(0.5, 2, 1, 10, 2, 1, 0.5)),
+    trailer = list(RFP = 1)
+  )
+  expect_error(validate_rnase_bias(nested), "not by region")
+  expect_error(validate_rnase_bias(nested), "switches RNase smearing off everywhere")
+  # The message has to name the offending entry and say what to write instead.
+  expect_error(validate_rnase_bias(nested), "rnase_bias entries 'leader', 'cds', 'trailer' contain")
+  expect_error(validate_rnase_bias(nested), "one kernel per library type")
+
+  # Entries must be numeric: unlike ideal_coverage, a quoted expression is never
+  # evaluated for this argument, so it would also switch smearing off.
+  expect_error(
+    validate_rnase_bias(list(RFP = quote(1 / seq.int(x)))),
+    "is not a numeric vector"
+  )
+  expect_error(validate_rnase_bias(list(RFP = c(1, NA, 1))), "NA, NaN or Inf")
+  expect_error(validate_rnase_bias(list(c(1, 2, 1))), "named list")
+
+  # A duplicated library name is a third silent way to lose the kernel:
+  # rnase_bias[["RFP"]] returns the first match, so this pair reads as "RFP has a
+  # kernel" but resolves to NULL (measured: reach 0).
+  expect_error(
+    validate_rnase_bias(list(RFP = NULL, RFP = c(1, 2, 1))),
+    "duplicates: RFP"
+  )
+
+  # An even-length kernel has no center position, so sim_sequence_bias() returns
+  # one alpha value fewer than the row count that rnase_kernel_reach() creates
+  # (measured: 10 alphas against 11 rows for a 9 nt region with c(1, 1)).
+  expect_error(validate_rnase_bias(list(RFP = c(1, 1))), "which is an even number")
+  expect_error(validate_rnase_bias(list(RFP = c(1, 1))), "shifted by one nucleotide")
+  # The message must state the actual count, so the reader can see what to change.
+  expect_error(validate_rnase_bias(list(RFP = c(1, 2, 1, 2))), "has 4 weights")
+
+  # An all-zero kernel -- including the scalar 0, which reads like a natural way
+  # to say "off" -- makes every smoothed weight 0, so the mean-preserving
+  # rescale in sim_sequence_bias() divides by zero and the whole alpha vector
+  # becomes NaN. That used to surface much later as a misleading
+  # "dmn_alpha_scale produced invalid Dirichlet alpha values".
+  expect_error(validate_rnase_bias(list(RFP = 0)), "no positive weight")
+  # And it must point at the right way to switch smearing off.
+  expect_error(validate_rnase_bias(list(RFP = 0)), "use 1\n?\\s*or NULL rather than 0")
+  expect_error(validate_rnase_bias(list(RFP = c(0, 0, 0))), "no positive weight")
+  expect_error(validate_rnase_bias(list(RFP = c(1, -1, 1))), "cannot be negative")
+
+  # The supported flat shapes all stay valid, including the package default --
+  # which is deliberately asymmetric, so symmetry must not be required.
+  expect_silent(validate_rnase_bias(NULL))
+  expect_silent(validate_rnase_bias(list(RFP = NULL)))
+  expect_silent(validate_rnase_bias(list(RFP = 1, RNA = 1)))
+  expect_silent(validate_rnase_bias(list(RFP = c(0, 1, 0))))
+  expect_silent(validate_rnase_bias(
+    list(RFP = c(0.5, 2, 1, 10, 2, 1, 0.5), RNA = 1, CAGE = 1, PAS = 1)
+  ))
+  expect_false(identical(c(0.5, 2, 1, 10, 2, 1, 0.5), rev(c(0.5, 2, 1, 10, 2, 1, 0.5))))
+
+  # And simNGScoverage() rejects it up front: validate_rnase_bias() runs before
+  # input_validation_controller(), so this fails on the rnase_bias shape rather
+  # than on the deliberately bogus genome paths -- i.e. before any annotation is
+  # loaded and before any read file is written.
+  expect_error(
+    simNGScoverage(
+      simGenome = c(genome = "nope.fasta", gtf = "nope.gtf", txdb = "nope.db"),
+      count_table = NULL, rnase_bias = nested
+    ),
+    "not by region"
+  )
+})
+
 test_that("a zero-padded MN libtype places reads exactly at the true CDS start, not the RNase flank", {
   # Deterministic check that zero-padding lines up with the correct rows: a
   # spike ideal_coverage weight vector plus region_counts == 1 forces RNA's

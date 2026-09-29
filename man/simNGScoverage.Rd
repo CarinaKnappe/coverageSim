@@ -63,10 +63,31 @@ cds =          list(RFP = quote(rep.int(c(1, 0, 0), length.out = x))),
 trailer =      list(PAS = quote(c(rep.int(0, x -1), 1))),
 uorf =         list(RFP = quote(rep.int(c(1, 0, 0), length.out = x))))}
 
-\item{rnase_bias}{= list(leader =  list(RFP = 1, RNA = 1, CAGE = quote(1/seq.int(x)), PAS = quote(1/seq.int(x, 1))),
-cds =     list(RFP = c(5, 2, 1), RNA = 1, CAGE = quote(1/seq.int(x)), PAS = quote(1/seq.int(x, 1))),
-trailer = list(RFP = 1, RNA = 1, CAGE = quote(1/seq.int(x)), PAS = quote(1/seq.int(x, 1))),
-uorf = list(RFP = c(5, 2, 1), RNA = 1, CAGE = quote(1/seq.int(x)), PAS = quote(1/seq.int(x, 1))))}
+\item{rnase_bias}{Named list with **one numeric kernel per library type** (not
+per region), default \code{list(RFP = c(0.5, 2, 1, 10, 2, 1, 0.5), RNA = 1,
+CAGE = 1, PAS = 1)}. The kernel models RNase digestion smearing reads across
+the footprint boundary: it is convolved with a region's nucleotide-level
+Dirichlet alpha vector, so it only affects regions sampled with
+\code{sampling = "DMN"}. Use \code{1} or \code{NULL} to disable smearing for
+a library type (not \code{0}, which would make every smoothed weight zero).
+Each kernel must be numeric, of **odd** length (it is applied center-aligned,
+and the row layout is extended by \code{floor(length/2)} per side), finite,
+non-negative, and have at least one positive weight; it need not be
+symmetric -- the default deliberately is not, which is what produces the
+manuscript's roughly 5:1:2 reading-frame ratio. Quoted expressions are not
+evaluated for this argument (unlike \code{ideal_coverage} and
+\code{auto_correlation}) and are rejected.
+
+Note that a region's row layout is extended by the **RFP** kernel's reach
+(\code{floor(length/2)}) alone, because only RFP is modeled as having
+RNase-footprint smearing. Consequently a *different* library type that samples
+a DMN region with a kernel whose length differs from RFP's is currently not
+supported and fails with a row-count mismatch.
+
+Unlike \code{ideal_coverage}, \code{auto_correlation}, \code{sampling} and
+\code{simCountTablesRegions()}'s \code{region_proportion}, this argument is
+*not* nested by region. A region-nested list is rejected, because it would
+otherwise silently disable the RNase kernel entirely.}
 
 \item{auto_correlation}{= list(leader = list(RFP = 1, RNA = 1, CAGE = 1, PAS = 1),
    cds = list(RFP = quote(abs(cos(seq(0, pi*(x/30), pi/30))) + 0.1), RNA = 1, CAGE = 1, PAS = 1),

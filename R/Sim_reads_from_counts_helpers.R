@@ -165,6 +165,107 @@ validate_dmn_alpha_scale <- function(scale) {
   invisible(scale)
 }
 
+# rnase_bias is keyed by library type only, while every other per-library
+# argument of simNGScoverage() (ideal_coverage, auto_correlation, sampling) and
+# simCountTablesRegions()'s region_proportion are nested by region. Passing a
+# region-nested rnase_bias is therefore an easy mistake, and a silent one:
+# rnase_bias[["RFP"]] is then NULL, which switches the RNase kernel off for
+# every region instead of failing -- collapsing the simulated reading-frame
+# distribution from roughly 5:1:2 to 100:0:0. Reject that shape explicitly, and
+# reject non-numeric entries too, since a quoted expression is never evaluated
+# for this argument (unlike ideal_coverage's).
+validate_rnase_bias <- function(rnase_bias) {
+  if (is.null(rnase_bias)) return(invisible(NULL))
+  if (!is.list(rnase_bias) || is.null(names(rnase_bias)) ||
+      any(!nzchar(names(rnase_bias)))) {
+    stop("rnase_bias must be a named list with one entry per library type",
+         call. = FALSE)
+  }
+  # Duplicate names are another silent way to lose the kernel: rnase_bias[["RFP"]]
+  # returns the FIRST match, so list(RFP = NULL, RFP = c(1, 2, 1)) disables
+  # smearing while looking like it enables it.
+  duplicated_names <- unique(names(rnase_bias)[duplicated(names(rnase_bias))])
+  if (length(duplicated_names)) {
+    stop("rnase_bias must name each library type once, but got duplicates: ",
+         paste(duplicated_names, collapse = ", "),
+         ". Only the first entry per name is ever used.", call. = FALSE)
+  }
+  nested <- names(rnase_bias)[vapply(rnase_bias, is.list, logical(1))]
+  if (length(nested)) {
+    stop("rnase_bias ",
+         if (length(nested) > 1L) "entries '" else "entry '",
+         paste(nested, collapse = "', '"), "' ",
+         if (length(nested) > 1L) "contain" else "contains",
+         " a list, so this looks like a per-region list. rnase_bias is ",
+         "the one argument here that is grouped by library type only, not by ",
+         "region. Written per region it would be read as 'no kernel for RFP', ",
+         "which switches RNase smearing off everywhere: the simulated coverage ",
+         "then sits only on exact codon positions instead of spreading over all ",
+         "three reading-frame positions. Use one kernel per library type, e.g. ",
+         "list(RFP = c(0.5, 2, 1, 10, 2, 1, 0.5), RNA = 1).", call. = FALSE)
+  }
+  # Odd length: the kernel is applied center-aligned, and rnase_kernel_reach()
+  # extends each gene by floor(length/2) rows per side. An even-length kernel has
+  # no center, so sim_sequence_bias() returns one alpha value fewer than the row
+  # count -- e.g. a 9 nt region with c(1, 1) yields 10 alphas against 11 rows.
+  # An all-zero kernel (including the scalar 0, which looks like a natural way to
+  # say "off") makes every smoothed weight 0, so the mean-preserving rescale
+  # divides by zero and the whole alpha vector becomes NaN; that surfaces later as
+  # a misleading "dmn_alpha_scale produced invalid Dirichlet alpha values".
+  # Use 1 or NULL to disable smearing instead.
+  # Each message says what is wrong, why it matters and what to do instead: the
+  # reader of a validation error is by definition someone who does not know this
+  # file, so "applied center-aligned" or "reach" would help nobody.
+  problem <- vapply(names(rnase_bias), function(name) {
+    kernel <- rnase_bias[[name]]
+    label <- paste0("rnase_bias$", name)
+    if (is.null(kernel)) return(NA_character_)
+    if (!is.numeric(kernel) || !length(kernel)) {
+      return(paste0(
+        label, " is not a numeric vector. This argument takes plain numbers, one",
+        " weight per position; unlike ideal_coverage and auto_correlation a",
+        " quote(...) expression is never evaluated here, so it would silently",
+        " switch RNase smearing off."
+      ))
+    }
+    if (!all(is.finite(kernel))) {
+      return(paste0(label, " contains NA, NaN or Inf. Every weight must be a",
+                    " finite number."))
+    }
+    if (length(kernel) %% 2L != 1L) {
+      return(paste0(
+        label, " has ", length(kernel), " weights, which is an even number. The",
+        " weights describe how far RNase digestion spreads a read's signal onto",
+        " neighbouring positions, so one of them has to sit on the read's own",
+        " position and the rest have to spread equally to either side -- that",
+        " needs an odd count. With an even count there is no middle weight, the",
+        " spread becomes one-sided and the simulated coverage would end up",
+        " shifted by one nucleotide."
+      ))
+    }
+    if (any(kernel < 0)) {
+      return(paste0(
+        label, " contains a negative weight. A weight is the share of a read's",
+        " signal that lands on a neighbouring position, so it cannot be negative."
+      ))
+    }
+    if (!any(kernel > 0)) {
+      return(paste0(
+        label, " has no positive weight, so every position would receive a share",
+        " of zero and the coverage could not be rescaled (you would get NaN",
+        " further down). To switch RNase smearing off for a library type, use 1",
+        " or NULL rather than 0."
+      ))
+    }
+    NA_character_
+  }, character(1), USE.NAMES = FALSE)
+  invalid <- !is.na(problem)
+  if (any(invalid)) {
+    stop(paste(problem[invalid], collapse = " "), call. = FALSE)
+  }
+  invisible(NULL)
+}
+
 resolve_dmn_alpha_scale <- function(scale, seq_bias) {
   if (!is.null(scale)) {
     validate_dmn_alpha_scale(scale)
