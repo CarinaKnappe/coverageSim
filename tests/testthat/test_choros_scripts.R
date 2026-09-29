@@ -1,6 +1,6 @@
 test_that("CHOROS helper builds a zero-filled model universe", {
   helper_file <- testthat::test_path(
-    "..", "..", "choros", "choros_utils.R"
+    "..", "..", "analysis", "benchmarks", "choros", "choros_utils.R"
   )
   helper_env <- new.env(parent = globalenv())
   sys.source(helper_file, envir = helper_env)
@@ -34,7 +34,7 @@ test_that("CHOROS helper builds a zero-filled model universe", {
 
 test_that("CHOROS resolves each coverageSim dataset and sample independently", {
   helper_env <- new.env(parent = globalenv())
-  sys.source(testthat::test_path("..", "..", "choros", "choros_utils.R"),
+  sys.source(testthat::test_path("..", "..", "analysis", "benchmarks", "choros", "choros_utils.R"),
              envir = helper_env)
   dataset <- tempfile("choros-covsim-")
   dir.create(dataset)
@@ -59,7 +59,7 @@ test_that("CHOROS resolves each coverageSim dataset and sample independently", {
 
 test_that("CHOROS end profiles show complete symmetric flanks", {
   helper_file <- testthat::test_path(
-    "..", "..", "choros", "choros_utils.R"
+    "..", "..", "analysis", "benchmarks", "choros", "choros_utils.R"
   )
   helper_env <- new.env(parent = globalenv())
   sys.source(helper_file, envir = helper_env)
@@ -86,12 +86,12 @@ test_that("CHOROS end profiles show complete symmetric flanks", {
 
 
 test_that("real-human CHOROS separates preparation and modeling", {
-  driver_file <- testthat::test_path("..", "..", "choros", "choros_real_human.R")
+  driver_file <- testthat::test_path("..", "..", "analysis", "benchmarks", "choros", "choros_real_human.R")
   expect_no_error(parse(driver_file))
   driver <- readLines(driver_file, warn = FALSE)
   expect_true(any(grepl("readRDS(prepared_file)", driver, fixed = TRUE)))
   expect_false(any(grepl("detect_ribosome_shifts_compat", driver, fixed = TRUE)))
-  prepare_file <- testthat::test_path("..", "..", "choros", "prepare_choros_real_human.R")
+  prepare_file <- testthat::test_path("..", "..", "analysis", "benchmarks", "choros", "prepare_choros_real_human.R")
   expect_no_error(parse(prepare_file))
   prepare <- readLines(prepare_file, warn = FALSE)
   expect_true(any(grepl("select_periodic_lengths", prepare, fixed = TRUE)))
@@ -101,7 +101,7 @@ test_that("real-human CHOROS separates preparation and modeling", {
 
 test_that("CHOROS resolves unknown circularity without changing coordinates", {
   helper_file <- testthat::test_path(
-    "..", "..", "choros", "choros_utils.R"
+    "..", "..", "analysis", "benchmarks", "choros", "choros_utils.R"
   )
   helper_env <- new.env(parent = globalenv())
   sys.source(helper_file, envir = helper_env)
@@ -127,7 +127,7 @@ test_that("CHOROS resolves unknown circularity without changing coordinates", {
 
 test_that("CHOROS maps read ends without duplicating transcript ranges", {
   helper_file <- testthat::test_path(
-    "..", "..", "choros", "choros_utils.R"
+    "..", "..", "analysis", "benchmarks", "choros", "choros_utils.R"
   )
   helper_env <- new.env(parent = globalenv())
   sys.source(helper_file, envir = helper_env)
@@ -156,7 +156,7 @@ test_that("CHOROS maps read ends without duplicating transcript ranges", {
 
 test_that("CHOROS aligns CDS and transcript regions by transcript name", {
   helper_file <- testthat::test_path(
-    "..", "..", "choros", "choros_utils.R"
+    "..", "..", "analysis", "benchmarks", "choros", "choros_utils.R"
   )
   helper_env <- new.env(parent = globalenv())
   sys.source(helper_file, envir = helper_env)
@@ -182,7 +182,7 @@ test_that("CHOROS aligns CDS and transcript regions by transcript name", {
 
 test_that("CHOROS derives plausible offsets from observed TIS peaks", {
   helper_env <- new.env(parent = globalenv())
-  sys.source(testthat::test_path("..", "..", "choros", "choros_utils.R"),
+  sys.source(testthat::test_path("..", "..", "analysis", "benchmarks", "choros", "choros_utils.R"),
              envir = helper_env)
   reads <- data.table::rbindlist(list(
     data.table::data.table(L = 28L, dist_start = -12L, score = rep(1, 120L)),
@@ -198,7 +198,7 @@ test_that("CHOROS derives plausible offsets from observed TIS peaks", {
 
 test_that("CHOROS periodic-length QC rejects weak frame enrichment", {
   helper_env <- new.env(parent = globalenv())
-  sys.source(testthat::test_path("..", "..", "choros", "choros_utils.R"),
+  sys.source(testthat::test_path("..", "..", "analysis", "benchmarks", "choros", "choros_utils.R"),
              envir = helper_env)
   reads <- data.table::data.table(
     L = c(rep(28L, 12L), rep(29L, 12L)),
@@ -213,16 +213,16 @@ test_that("CHOROS periodic-length QC rejects weak frame enrichment", {
 })
 
 test_that("coverageSim CHOROS scripts are configurable and parseable", {
-  prepare_file <- testthat::test_path("..", "..", "choros",
+  prepare_file <- testthat::test_path("..", "..", "analysis", "benchmarks", "choros",
                                      "prepare_choros_covsim_human_genome_only.R")
-  model_file <- testthat::test_path("..", "..", "choros",
+  model_file <- testthat::test_path("..", "..", "analysis", "benchmarks", "choros",
                                    "choros_covsim_human_genome_only.R")
   expect_no_error(parse(prepare_file))
   expect_no_error(parse(model_file))
   prepare <- readLines(prepare_file, warn = FALSE)
   model <- readLines(model_file, warn = FALSE)
   helper <- readLines(
-    testthat::test_path("..", "..", "choros", "choros_utils.R"),
+    testthat::test_path("..", "..", "analysis", "benchmarks", "choros", "choros_utils.R"),
     warn = FALSE
   )
   expect_true(any(grepl("CHOROS_COVSIM_BASE", prepare, fixed = TRUE)))
@@ -239,7 +239,7 @@ test_that("coverageSim CHOROS scripts are configurable and parseable", {
 
 test_that("coverageSim-like reads produce valid CHOROS geometry", {
   helper_env <- new.env(parent = globalenv())
-  sys.source(testthat::test_path("..", "..", "choros", "choros_utils.R"),
+  sys.source(testthat::test_path("..", "..", "analysis", "benchmarks", "choros", "choros_utils.R"),
              envir = helper_env)
   reads <- data.table::data.table(
     L = rep(28L, 120L),
@@ -261,7 +261,7 @@ test_that("coverageSim-like reads produce valid CHOROS geometry", {
 
 test_that("coverageSim preprocessing restores zero BAM header lengths", {
   prepare_file <- testthat::test_path(
-    "..", "..", "choros", "prepare_choros_covsim_human_genome_only.R"
+    "..", "..", "analysis", "benchmarks", "choros", "prepare_choros_covsim_human_genome_only.R"
   )
   expressions <- parse(prepare_file)
   is_restore <- vapply(expressions, function(expr) {
@@ -286,7 +286,7 @@ test_that("coverageSim preprocessing restores zero BAM header lengths", {
 })
 
 test_that("CHOROS README documents both server workflows and result layouts", {
-  readme_file <- testthat::test_path("..", "..", "choros", "README.md")
+  readme_file <- testthat::test_path("..", "..", "analysis", "benchmarks", "choros", "README.md")
   expect_true(file.exists(readme_file))
   readme <- paste(readLines(readme_file, warn = FALSE), collapse = "\n")
   expect_match(readme, "SRR32491292.sorted.unique_nh1.ofst", fixed = TRUE)
@@ -299,7 +299,7 @@ test_that("CHOROS README documents both server workflows and result layouts", {
 
 test_that("coverageSim keeps all abundant configured read lengths", {
   helper_env <- new.env(parent = globalenv())
-  sys.source(testthat::test_path("..", "..", "choros", "choros_utils.R"),
+  sys.source(testthat::test_path("..", "..", "analysis", "benchmarks", "choros", "choros_utils.R"),
              envir = helper_env)
   reads <- data.table::data.table(
     L = rep(28:30, each = 12L),
@@ -312,7 +312,7 @@ test_that("coverageSim keeps all abundant configured read lengths", {
   )
   expect_equal(selected$lengths, 28:30)
   prepare <- readLines(testthat::test_path(
-    "..", "..", "choros", "prepare_choros_covsim_human_genome_only.R"
+    "..", "..", "analysis", "benchmarks", "choros", "prepare_choros_covsim_human_genome_only.R"
   ), warn = FALSE)
   expect_true(any(grepl("configured_lengths <- 28:30", prepare, fixed = TRUE)))
   expect_true(any(grepl("min_frame_prop = 0", prepare, fixed = TRUE)))

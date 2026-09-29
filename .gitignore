@@ -37,6 +37,6 @@ tests/tests_and_demos/real_human_riboseq/
 # does not need to be redistributed here.
 analysis/benchmarks/rust/upstream/
 analysis/benchmarks/rust/.venv-rust-original/
-choros/results/
-choros/.Rhistory
+analysis/benchmarks/choros/results/
+analysis/benchmarks/choros/.Rhistory
 __pycache__/

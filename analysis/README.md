@@ -23,7 +23,7 @@ analysis/
                                    upstream/RUST/requirements.txt
 ```
 
-The choros comparison lives in `../choros/` and is not part of this directory.
+The choros comparison lives in `benchmarks/choros/`.
 
 ## Contents
 

@@ -14,7 +14,7 @@ test_that("Git excludes data and vendored code but retains every analysis source
     "analysis/benchmarks/rust/upstream/RUST/RUST/codon.py",
     "analysis/benchmarks/rust/.venv-rust-original/lib/python3.12/site-packages/numpy/version.py",
     "analysis/workflows/__pycache__/natural_end_model.cpython-312.pyc",
-    "choros/results/summary.tsv",
+    "analysis/benchmarks/choros/results/summary.tsv",
     "tests/tests_and_demos/Parameter_settings_per_run.ods",
     "git_ignore/coverageSim_bias_overview.xlsx",
     ".agents/onboarding.md",
@@ -40,7 +40,7 @@ test_that("Git excludes data and vendored code but retains every analysis source
     "tests/tests_and_demos/bigData.R",
     "tests/tests_and_demos/learn_from_HumanGenome.R",
     "tests/tests_and_demos/figure3c_alpha_calibration.R",
-    "choros/choros_utils.R",
+    "analysis/benchmarks/choros/choros_utils.R",
     "analysis/R/Learn_from_input.R",
     "analysis/benchmarks/rust/natural_end_model.py",
     "analysis/tests/test_learn_from_input.R"
