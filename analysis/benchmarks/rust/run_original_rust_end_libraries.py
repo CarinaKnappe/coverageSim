@@ -10,7 +10,10 @@ from collections import Counter
 import pysam
 
 REPO = Path(__file__).resolve().parents[3]
-ROOT = REPO / 'analysis/benchmarks/rust/runs/2026-09-10_original-rust_read-ends'
+# Stored runs live beside the repository, not inside it; COVSIM_DATA_ROOT
+# overrides the location the same way the R workflows allow.
+DATA = Path(os.environ.get('COVSIM_DATA_ROOT', REPO.parent / 'coverageSim_data'))
+ROOT = DATA / 'runs/2026-09-10_original-rust_read-ends'
 UPSTREAM = REPO / 'analysis/benchmarks/rust/upstream/RUST'
 SCENARIOS = ['control', 'five_prime', 'three_prime', 'both_ends']
 

@@ -10,7 +10,7 @@ test_that("Git excludes data and vendored code but retains every analysis source
   # code that we only reference, or it is personal material. Note that the
   # folders themselves are not excluded -- only what sits inside them.
   excluded <- c(
-    "analysis/benchmarks/rust/runs/2026-09-09_300tx_codon-bias_run2/reads/RFP_benchmark.bam",
+    "analysis/benchmarks/rust/__pycache__/natural_end_model.cpython-312.pyc",
     "analysis/benchmarks/rust/upstream/RUST/RUST/codon.py",
     "analysis/benchmarks/rust/.venv-rust-original/lib/python3.12/site-packages/numpy/version.py",
     "analysis/workflows/__pycache__/natural_end_model.cpython-312.pyc",

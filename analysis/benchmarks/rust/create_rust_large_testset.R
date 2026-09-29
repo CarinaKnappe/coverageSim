@@ -3,7 +3,9 @@ devtools::load_all(".")
 library(ORFik)
 library(data.table)
 set.seed(20260909)
-root <- file.path(getwd(), "analysis", "benchmarks", "rust", "runs", "2026-09-09_300tx_codon-bias_run2")
+root <- file.path(
+  Sys.getenv("COVSIM_DATA_ROOT", unset = file.path(dirname(getwd()), "coverageSim_data")),
+  "runs", "2026-09-09_300tx_codon-bias_run2")
 if (dir.exists(root)) stop("Output already exists: ", root)
 dir.create(root, recursive = TRUE)
 genome <- simGenome(n = 300L, out_dir = file.path(root, "genome"),

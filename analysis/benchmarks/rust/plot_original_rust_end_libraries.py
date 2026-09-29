@@ -8,7 +8,10 @@ import sys
 import numpy as np
 
 REPO = Path(__file__).resolve().parents[3]
-ROOT = REPO / 'analysis/benchmarks/rust/runs/2026-09-10_original-rust_read-ends'
+# Stored runs live beside the repository, not inside it; COVSIM_DATA_ROOT
+# overrides the location the same way the R workflows allow.
+DATA = Path(os.environ.get('COVSIM_DATA_ROOT', REPO.parent / 'coverageSim_data'))
+ROOT = DATA / 'runs/2026-09-10_original-rust_read-ends'
 os.environ['MPLCONFIGDIR'] = str(ROOT / 'matplotlib_cache')
 sys.path.insert(0, str(REPO / 'analysis/benchmarks/rust/upstream/RUST'))
 import matplotlib

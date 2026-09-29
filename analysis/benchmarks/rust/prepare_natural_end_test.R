@@ -2,14 +2,15 @@
 devtools::load_all(".")
 library(ORFik)
 library(data.table)
-root <- file.path(getwd(), "analysis/benchmarks/rust/runs/2026-09-10_natural-read-ends")
+data_root <- Sys.getenv("COVSIM_DATA_ROOT", unset = file.path(dirname(getwd()), "coverageSim_data"))
+root <- file.path(data_root, "runs", "2026-09-10_natural-read-ends")
 if (dir.exists(root)) stop("Output exists: ", root)
 dir.create(root, recursive = TRUE)
-previous <- file.path(getwd(), "analysis/benchmarks/rust/runs/2026-09-10_original-rust_read-ends")
+previous <- file.path(data_root, "runs", "2026-09-10_original-rust_read-ends")
 for (name in c("transcripts.fa", "transcript_annotation.tsv")) {
   stopifnot(file.copy(file.path(previous, name), file.path(root, name)))
 }
-genome_dir <- file.path(getwd(), "analysis/benchmarks/rust/runs/2026-09-09_300tx_codon-bias_run2/genome")
+genome_dir <- file.path(data_root, "runs", "2026-09-09_300tx_codon-bias_run2", "genome")
 cds <- loadRegion(file.path(genome_dir, "rust_large.gtf.db"), "cds")
 set.seed(202609101L)
 # Two NB draws with identical underlying expression: betaSD=0.
