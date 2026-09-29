@@ -60,6 +60,11 @@ dir.create(file.path(out_base, "genome"), recursive = TRUE, showWarnings = FALSE
 dir.create(file.path(out_base, "reads"), recursive = TRUE, showWarnings = FALSE)
 dir.create(file.path(out_base, "experiment"), recursive = TRUE, showWarnings = FALSE)
 
+# Record which code produced this run. Without it, a stored result cannot be
+# traced back to the source that made it -- and because load_all() above reads
+# the working directory, unsaved edits count too, which is what this records.
+write_code_version(out_base)
+
 seed <- as.integer(Sys.getenv("COVSIM_BIGDATA_SEED", unset = "42"))
 set.seed(seed)
 
