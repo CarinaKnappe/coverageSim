@@ -10,10 +10,10 @@ test_that("Git excludes data and vendored code but retains every analysis source
   # code that we only reference, or it is personal material. Note that the
   # folders themselves are not excluded -- only what sits inside them.
   excluded <- c(
-    "rust_helpers/runs/2026-09-09_300tx_codon-bias_run2/reads/RFP_benchmark.bam",
-    "rust_helpers/upstream/RUST/RUST/codon.py",
-    "rust_helpers/.venv-rust-original/lib/python3.12/site-packages/numpy/version.py",
-    "rust_helpers/workflows/__pycache__/natural_end_model.cpython-312.pyc",
+    "analysis/benchmarks/rust/runs/2026-09-09_300tx_codon-bias_run2/reads/RFP_benchmark.bam",
+    "analysis/benchmarks/rust/upstream/RUST/RUST/codon.py",
+    "analysis/benchmarks/rust/.venv-rust-original/lib/python3.12/site-packages/numpy/version.py",
+    "analysis/workflows/__pycache__/natural_end_model.cpython-312.pyc",
     "choros/results/summary.tsv",
     "tests/tests_and_demos/Parameter_settings_per_run.ods",
     "git_ignore/coverageSim_bias_overview.xlsx",
@@ -33,7 +33,7 @@ test_that("Git excludes data and vendored code but retains every analysis source
     "tests/testthat/test_simulations.R",
     "tests/testthat/test_simulated_rpf_fragments.R",
     "tests/testthat/test_choros_scripts.R",
-    "tests/testthat/test_rust_helpers_separation.R",
+    "tests/testthat/test_analysis_separation.R",
     "tests/testthat/test_bias_overview_workbook.R",
     "tests/testthat/test_deprecated_dataset_layout.R",
     "tests/testthat/natural_end_model_checks.py",
@@ -41,9 +41,9 @@ test_that("Git excludes data and vendored code but retains every analysis source
     "tests/tests_and_demos/learn_from_HumanGenome.R",
     "tests/tests_and_demos/figure3c_alpha_calibration.R",
     "choros/choros_utils.R",
-    "rust_helpers/R/Learn_from_input.R",
-    "rust_helpers/workflows/natural_end_model.py",
-    "rust_helpers/tests/test_learn_from_input.R"
+    "analysis/R/Learn_from_input.R",
+    "analysis/benchmarks/rust/natural_end_model.py",
+    "analysis/tests/test_learn_from_input.R"
   )
   ignored <- system2(
     "git",

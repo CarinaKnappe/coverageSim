@@ -9,9 +9,9 @@ import sys
 from collections import Counter
 import pysam
 
-REPO = Path(__file__).resolve().parents[2]
-ROOT = REPO / 'rust_helpers/runs/2026-09-10_original-rust_read-ends'
-UPSTREAM = REPO / 'rust_helpers/upstream/RUST'
+REPO = Path(__file__).resolve().parents[3]
+ROOT = REPO / 'analysis/benchmarks/rust/runs/2026-09-10_original-rust_read-ends'
+UPSTREAM = REPO / 'analysis/benchmarks/rust/upstream/RUST'
 SCENARIOS = ['control', 'five_prime', 'three_prime', 'both_ends']
 
 

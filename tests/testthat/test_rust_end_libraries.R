@@ -1,5 +1,5 @@
 local_end_helpers <- function() {
-  path <- test_path("..", "..", "rust_helpers", "R", "end_bias_library_helpers.R")
+  path <- test_path("..", "..", "analysis", "R", "end_bias_library_helpers.R")
   skip_if_not(file.exists(path), "Local RUST benchmark helpers are not distributed")
   env <- new.env(parent = globalenv())
   sys.source(path, envir = env)

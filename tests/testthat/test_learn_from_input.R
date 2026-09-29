@@ -3,7 +3,7 @@ repo_dir <- normalizePath(
   mustWork = TRUE
 )
 
-source(file.path(repo_dir, "rust_helpers", "R", "Learn_from_input.R"))
+source(file.path(repo_dir, "analysis", "R", "Learn_from_input.R"))
 
 make_learn_input_fixture <- function() {
   genome_dir <- tempfile("coverageSim-learn-genome-")

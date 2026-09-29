@@ -12,9 +12,9 @@ import pysam
 from natural_end_model import *
 from rust_plot_compat import render_original_plot
 
-REPO = Path(__file__).resolve().parents[2]
-ROOT = REPO / 'rust_helpers/runs/2026-09-10_natural-read-ends'
-UPSTREAM = REPO / 'rust_helpers/upstream/RUST'
+REPO = Path(__file__).resolve().parents[3]
+ROOT = REPO / 'analysis/benchmarks/rust/runs/2026-09-10_natural-read-ends'
+UPSTREAM = REPO / 'analysis/benchmarks/rust/upstream/RUST'
 os.environ['MPLCONFIGDIR'] = str(ROOT / 'matplotlib_cache')
 sys.path.insert(0,str(UPSTREAM))
 

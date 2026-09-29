@@ -3,7 +3,7 @@
 ^\.github$
 ^AGENTS\.md$
 ^CLAUDE\.md$
-^rust_helpers$
+^analysis$
 ^choros$
 ^git_ignore$
 ^\.agents$

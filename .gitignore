@@ -32,12 +32,12 @@ tests/tests_and_demos/real_human_riboseq/
 /test_output.txt
 
 # Analysis code IS tracked; only the data and vendored third-party code inside
-# those folders is not. rust_helpers/upstream is a separate GPL-3 repository
+# those folders is not. analysis/benchmarks/rust/upstream is a separate GPL-3 repository
 # (JackCurragh/RUST) -- its exact commit is recorded in each run manifest, so it
 # does not need to be redistributed here.
-rust_helpers/runs/
-rust_helpers/upstream/
-rust_helpers/.venv-rust-original/
+analysis/benchmarks/rust/runs/
+analysis/benchmarks/rust/upstream/
+analysis/benchmarks/rust/.venv-rust-original/
 choros/results/
 choros/.Rhistory
 __pycache__/

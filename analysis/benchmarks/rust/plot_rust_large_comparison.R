@@ -1,6 +1,6 @@
 devtools::load_all(".")
 library(data.table)
-root <- Sys.getenv("COVSIM_RUST_LARGE_OUTPUT", file.path(getwd(), "rust_helpers/runs/2026-09-09_300tx_codon-bias_run2"))
+root <- Sys.getenv("COVSIM_RUST_LARGE_OUTPUT", file.path(getwd(), "analysis/benchmarks/rust/runs/2026-09-09_300tx_codon-bias_run2"))
 analyses <- c(control = "control_28/rust_correct", strong_single = "strong_28/rust_correct",
               strong_mixed = "strong_mixed/rust_correct", wrong_offset = "strong_mixed/rust_common15")
 profiles <- lapply(file.path(root, analyses), function(x) fread(file.path(x, "RUST_A_site_profiles.csv")))

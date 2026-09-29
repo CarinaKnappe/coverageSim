@@ -3,7 +3,7 @@ repo_dir <- normalizePath(
   mustWork = TRUE
 )
 
-source(file.path(repo_dir, "rust_helpers", "R", "Read_end_bias_helpers.R"))
+source(file.path(repo_dir, "analysis", "R", "Read_end_bias_helpers.R"))
 
 test_that("read-end nucleotide counts compare last base to whole-read composition", {
   seqs <- c("AAG", "AAA", "CCG", "TTT")

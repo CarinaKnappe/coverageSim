@@ -3,7 +3,7 @@ repo_dir <- normalizePath(
   mustWork = TRUE
 )
 
-source(file.path(repo_dir, "rust_helpers", "R", "G_end_dropout_helpers.R"))
+source(file.path(repo_dir, "analysis", "R", "G_end_dropout_helpers.R"))
 
 test_that("G-end dropout labels are stable", {
   expect_equal(g_end_dropout_label(0.30), "drop_G_30")

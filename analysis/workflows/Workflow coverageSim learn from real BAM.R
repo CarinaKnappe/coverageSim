@@ -16,7 +16,7 @@ data.table::setDTthreads(4)
 
 # Keep real-input learning outside the package namespace. These helpers are
 # analysis adapters; coverageSim itself should not depend on them.
-source(file.path(repo_dir, "rust_helpers", "R", "Learn_from_input.R"))
+source(file.path(repo_dir, "analysis", "R", "Learn_from_input.R"))
 
 base_dir <- normalizePath(
   Sys.getenv(

@@ -1,5 +1,5 @@
 test_that("heterogeneous fragment generation preserves geometry and library weights", {
-  python <- test_path("..", "..", "rust_helpers", ".venv-rust-original", "bin", "python")
+  python <- test_path("..", "..", "analysis", "benchmarks", "rust", ".venv-rust-original", "bin", "python")
   skip_if_not(file.exists(python), "Local RUST Python environment is unavailable")
   result <- system2(python, shQuote(test_path("natural_end_model_checks.py")), stdout = TRUE, stderr = TRUE)
   status <- attr(result, "status")

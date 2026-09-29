@@ -12,7 +12,7 @@ library(data.table)
 library(Biostrings)
 library(Rsamtools)
 
-source(file.path(repo_dir, "rust_helpers", "R", "Read_end_bias_helpers.R"))
+source(file.path(repo_dir, "analysis", "R", "Read_end_bias_helpers.R"))
 
 input_base <- normalizePath(
   path.expand(Sys.getenv("RUST_READ_END_INPUT", unset = "~/rust/10000a_different_gene_counts_drop_G_100")),

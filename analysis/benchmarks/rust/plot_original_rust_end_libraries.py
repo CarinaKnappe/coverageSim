@@ -7,10 +7,10 @@ from pathlib import Path
 import sys
 import numpy as np
 
-REPO = Path(__file__).resolve().parents[2]
-ROOT = REPO / 'rust_helpers/runs/2026-09-10_original-rust_read-ends'
+REPO = Path(__file__).resolve().parents[3]
+ROOT = REPO / 'analysis/benchmarks/rust/runs/2026-09-10_original-rust_read-ends'
 os.environ['MPLCONFIGDIR'] = str(ROOT / 'matplotlib_cache')
-sys.path.insert(0, str(REPO / 'rust_helpers/upstream/RUST'))
+sys.path.insert(0, str(REPO / 'analysis/benchmarks/rust/upstream/RUST'))
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt

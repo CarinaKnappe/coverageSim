@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 import unittest
 import numpy as np
-sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'rust_helpers/workflows'))
+sys.path.insert(0,str(Path(__file__).resolve().parents[2]/'analysis/benchmarks/rust'))
 from natural_end_model import *
 
 class NaturalEndModelChecks(unittest.TestCase):

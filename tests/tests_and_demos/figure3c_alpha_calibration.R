@@ -6,7 +6,7 @@ data.table::setDTthreads(4)
 
 source_run <- normalizePath(Sys.getenv(
   "COVSIM_HUMAN_LEARNING_RUN",
-  unset = file.path(repo_dir, "rust_helpers", "runs", "2026-09-11_human-learning")
+  unset = file.path(repo_dir, "analysis", "benchmarks", "rust", "runs", "2026-09-11_human-learning")
 ), mustWork = TRUE)
 out_dir <- Sys.getenv(
   "COVSIM_FIGURE3C_OUTPUT",

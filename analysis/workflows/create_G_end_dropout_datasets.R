@@ -10,7 +10,7 @@ devtools::load_all(repo_dir)
 
 # Helper code is kept outside the coverageSim package so this technical-bias
 # dataset generator does not become part of the simulator core.
-source(file.path(repo_dir, "rust_helpers", "R", "G_end_dropout_helpers.R"))
+source(file.path(repo_dir, "analysis", "R", "G_end_dropout_helpers.R"))
 
 input_base_raw <- Sys.getenv(
   "COVSIM_G_DROP_INPUT",

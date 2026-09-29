@@ -5,7 +5,7 @@ test_that("human genome-only workflow is parseable and does not require BAM lear
   )
   workflow <- file.path(
     repo_dir,
-    "rust_helpers",
+    "analysis",
     "workflows",
     "Workflow coverageSim human genome only.R"
   )
@@ -23,7 +23,11 @@ test_that("human genome-only workflow is parseable and does not require BAM lear
   expect_true(any(grepl("interceptSD = 1.5", script, fixed = TRUE)))
   expect_true(any(grepl("betaSD = 0.2", script, fixed = TRUE)))
   expect_true(any(grepl("read_lengths_per = list(RFP = 28:30)", script, fixed = TRUE)))
-  expect_true(any(grepl("load_seq_bias(type = \"codon\", shift = \"a-site\", bias = \"all\")", script, fixed = TRUE)))
+  # "all" returns every measured profile separately and validate_sequence_profile()
+  # rejects it for simulation; the workflow uses the cross-profile median, which is
+  # also load_seq_bias()'s own default. This assertion demanded "all" and was never
+  # run, because this file used to live outside the suite.
+  expect_true(any(grepl("load_seq_bias(type = \"codon\", shift = \"a-site\", bias = \"median\")", script, fixed = TRUE)))
   expect_true(any(grepl("site_reference = \"a_site\"", script, fixed = TRUE)))
   expect_true(any(grepl("ground_truth = TRUE", script, fixed = TRUE)))
 
@@ -38,7 +42,7 @@ test_that("real-input workflow learns and reuses A-site fragment geometry", {
     mustWork = TRUE
   )
   workflow <- file.path(
-    repo_dir, "rust_helpers", "workflows",
+    repo_dir, "analysis", "workflows",
     "Workflow coverageSim learn from real BAM.R"
   )
   expect_error(parse(workflow), NA)

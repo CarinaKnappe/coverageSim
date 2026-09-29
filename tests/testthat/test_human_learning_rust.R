@@ -1,7 +1,7 @@
 test_that("human-learning RUST workflow is syntactically valid and uses every scenario", {
   scripts <- c(
-    testthat::test_path("..", "..", "rust_helpers", "workflows", "run_human_learning_rust.py"),
-    testthat::test_path("..", "..", "rust_helpers", "workflows", "plot_human_learning_rust.py")
+    testthat::test_path("..", "..", "analysis", "benchmarks", "rust", "run_human_learning_rust.py"),
+    testthat::test_path("..", "..", "analysis", "benchmarks", "rust", "plot_human_learning_rust.py")
   )
   for (script in scripts) {
     status <- system2("python3", c("-m", "py_compile", shQuote(script)))
@@ -9,7 +9,7 @@ test_that("human-learning RUST workflow is syntactically valid and uses every sc
   }
   run_script <- readLines(scripts[1], warn = FALSE)
   settings <- data.table::fread(testthat::test_path(
-    "..", "..", "rust_helpers", "runs", "2026-09-11_human-learning",
+    "..", "..", "analysis", "benchmarks", "rust", "runs", "2026-09-11_human-learning",
     "scenario_settings.tsv"
   ))
   for (scenario in settings$scenario) {

@@ -11,9 +11,9 @@ import sys
 import pysam
 
 
-REPO = Path(__file__).resolve().parents[2]
-ROOT = REPO / "rust_helpers/runs/2026-09-11_human-learning"
-UPSTREAM = REPO / "rust_helpers/upstream/RUST"
+REPO = Path(__file__).resolve().parents[3]
+ROOT = REPO / "analysis/benchmarks/rust/runs/2026-09-11_human-learning"
+UPSTREAM = REPO / "analysis/benchmarks/rust/upstream/RUST"
 SCENARIOS = [
     "baseline", "counts_only", "geometry_only", "codon_only", "ends_only",
     "counts_geometry", "counts_geometry_codon", "all_supported",
