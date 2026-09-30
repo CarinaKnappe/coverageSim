@@ -74,7 +74,8 @@ Each kernel must be numeric, of **odd** length (it is applied center-aligned,
 and the row layout is extended by \code{floor(length/2)} per side), finite,
 non-negative, and have at least one positive weight; it need not be
 symmetric -- the default deliberately is not, which is what produces the
-manuscript's roughly 5:1:2 reading-frame ratio. Quoted expressions are not
+roughly 5:1:2 ratio between the three reading frames. Quoted expressions are
+not
 evaluated for this argument (unlike \code{ideal_coverage} and
 \code{auto_correlation}) and are rejected.
 
@@ -122,8 +123,8 @@ list(RFP = "ofst", RNA = "ofst", CAGE = "ofst", PAS = "ofst"). Alternatives:
 
 \item{seq_bias}{the sequence bias used for simulation, default \code{"AUTO"}:
 resolved to \code{load_seq_bias(shift = fragment_geometry$site_reference)},
-the motif-wise median of the amino-acid alpha estimates from libraries
-R1--R10 from the coverageSim paper, shifted to match whichever ribosome
+the motif-wise median of the amino-acid alpha estimates measured from the ten
+bundled human Ribo-seq libraries R1--R10, shifted to match whichever ribosome
 site \code{fragment_geometry$site_reference} uses to place simulated-RPF
 fragments around each nucleotide's signal position. Only resolved this way
 for \code{fragment_mode = "simulated_rpf"} (including the deprecated

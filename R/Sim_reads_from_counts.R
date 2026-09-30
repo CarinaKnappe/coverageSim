@@ -32,7 +32,8 @@
 #' and the row layout is extended by \code{floor(length/2)} per side), finite,
 #' non-negative, and have at least one positive weight; it need not be
 #' symmetric -- the default deliberately is not, which is what produces the
-#' manuscript's roughly 5:1:2 reading-frame ratio. Quoted expressions are not
+#' roughly 5:1:2 ratio between the three reading frames. Quoted expressions are
+#' not
 #' evaluated for this argument (unlike \code{ideal_coverage} and
 #' \code{auto_correlation}) and are rejected.
 #'
@@ -74,8 +75,8 @@
 #' @param true_uorf_ranges = "AUTO". Load from uorf string in 'simGenome'.
 #' @param seq_bias the sequence bias used for simulation, default \code{"AUTO"}:
 #' resolved to \code{load_seq_bias(shift = fragment_geometry$site_reference)},
-#' the motif-wise median of the amino-acid alpha estimates from libraries
-#' R1--R10 from the coverageSim paper, shifted to match whichever ribosome
+#' the motif-wise median of the amino-acid alpha estimates measured from the ten
+#' bundled human Ribo-seq libraries R1--R10, shifted to match whichever ribosome
 #' site \code{fragment_geometry$site_reference} uses to place simulated-RPF
 #' fragments around each nucleotide's signal position. Only resolved this way
 #' for \code{fragment_mode = "simulated_rpf"} (including the deprecated
@@ -170,6 +171,26 @@
 #' region_count_table <- simCountTablesRegions(gene_count_table,
 #'                  regionsToSample = c("leader", "cds", "trailer"))
 #' simNGScoverage(simGenome6, region_count_table)
+# Step 4 of the simulation: turn per-region read counts into actual reads.
+#
+# The first three steps decided how many reads each region of each gene gets.
+# This one decides where inside the region they land, and writes them out as an
+# alignment file. What happens per sample, in order:
+#
+#   1. Settle the settings. Several arguments accept "work it out for me", so
+#      they are resolved to concrete values once, up front, rather than being
+#      re-derived deep inside loops.
+#   2. Load the annotation and line it up with the count table. Annotation
+#      loaders do not promise to return transcripts in the order they were asked
+#      for, so every region is re-indexed against the count table's row names;
+#      getting this wrong would put one gene's reads on another gene.
+#   3. Build the per-position weights from the sequence (see add_sequence_bias()
+#      and sim_sequence_bias()).
+#   4. Distribute each region's reads over its positions, one sample at a time.
+#   5. Place a fragment around each signal position, then export.
+#
+# Between 4 and 5 the read total is checked: distributing reads must never create
+# or lose any, and a mismatch is a bug rather than a rounding artefact.
 simNGScoverage <- function(simGenome,
                            count_table = simCountTablesRegions(
                              simCountTables(loadRegion(simGenome["txdb"], "cds"))),
@@ -239,7 +260,7 @@ simNGScoverage <- function(simGenome,
   validate_rnase_bias(rnase_bias)
   input_validation_controller()
 
-  # Load annotation
+  # 2. Load the annotation for the requested transcripts.
   txdb <- loadTxdb(simGenome["txdb"])
   if (fragment_mode == "simulated_rpf") {
     mrna_ranges <- loadRegion(txdb, "mrna", names.keep = transcripts)
@@ -267,10 +288,11 @@ simNGScoverage <- function(simGenome,
       warning("Detected CDS ranges that ends on incomplete codon (is not %% 3 == 0 in length")
     }
   }
-  # Create sequence table and sequence bias, initiate coverage table
+  # 3. Read the sequences and attach a weight to every position.
   sequence_table_controller()
 
-  # Set up count tables
+  # Sum the per-region assays: a gene's reads are spread over leader, CDS,
+  # trailer and uORFs, and the total per gene is what has to be placed.
   assay <- assay(count_table); assay <- assay - assay
   for (i in seq_along(assayNames(count_table))[-1]) {
     assay <- assay + assay(count_table, i)
@@ -282,7 +304,7 @@ simNGScoverage <- function(simGenome,
   libtypes <- as.character(colData(count_table)$libtype)
   files <- c()
   message("- Sample coverage")
-  # For each sample create pdf for each (ORF/region) and sample
+  # 4. One sample at a time: distribute its reads, place fragments, export.
   for (s in seq_along(colnames)) {
     assay_column <- colnames[s]
     message("-- ", assay_column)
@@ -299,7 +321,8 @@ simNGScoverage <- function(simGenome,
                                         dmn_family, dmn_gdm_scale, dmn_zero_inflation,
                                         debug_coverage, env = environment(),
                                         defer_counts = defer_counts)
-    # Verify all reads have been distributed correctly
+    # Distributing reads only moves them between positions, so the total must
+    # match exactly. A difference here means a real defect, not rounding.
     expected_counts <- data.table::data.table(
       seqnames = assay_by_chromosome$seqnamesPer,
       expected = assay_by_chromosome[, assay_column, with = FALSE][[1]]
@@ -494,6 +517,14 @@ nt_coverage_all_regions <- function(count_table_regions, libClass,
 # from before ZIGDM: zero_inflation = 0 skips the masking step entirely, and
 # family = "dirichlet" keeps using the original Gamma-augmentation draw
 # below rather than rgdirichlet_generalized().
+# Turn per-position weights into the probabilities a region's reads are drawn with.
+#
+# With `dirichlet = FALSE` the weights are simply normalised, so every simulated
+# library from the same settings has exactly the same expected shape. With
+# `dirichlet = TRUE` the probabilities are drawn afresh for each library, which
+# is what makes two replicates of the same experiment differ from each other the
+# way real ones do. The weights act as concentrations: the larger they are, the
+# closer each draw stays to the average shape.
 draw_site_probabilities <- function(weights, dirichlet = FALSE,
                                     family = c("dirichlet", "generalized"),
                                     gdm_scale = 1, zero_inflation = 0) {
@@ -510,7 +541,13 @@ draw_site_probabilities <- function(weights, dirichlet = FALSE,
     }
     positive <- weights > 0
     alpha <- weights[positive]
-    # Gamma augmentation avoids all-zero draws for very small alpha values.
+    # Drawing a Dirichlet means drawing one Gamma variable per position and
+    # normalising. Done directly, very small concentrations underflow to exactly
+    # zero in every position at once, leaving nothing to normalise. Using the
+    # identity Gamma(a) = Gamma(a + 1) * U^(1/a) and working in logarithms keeps
+    # the arithmetic in a range that survives, which matters because small
+    # concentrations are exactly the setting that produces realistically spiky
+    # coverage.
     log_weights <- log(stats::rgamma(length(alpha), alpha + 1)) +
       log(stats::runif(length(alpha))) / alpha
     weights[positive] <- exp(log_weights - max(log_weights))

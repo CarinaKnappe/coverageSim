@@ -55,10 +55,10 @@ every row sums to the corresponding \code{size}.
 }
 \description{
 Extends \code{extraDistr::rdirmnom()} in two independent, composable ways,
-matching the Zero-Inflated Generalized Dirichlet-Multinomial ("ZIGDM")
-idea named as future work in the coverageSim manuscript (the standard
-Dirichlet-multinomial used in Step 4 slightly underestimates skew/the 3rd
-statistical moment relative to real Ribo-seq data):
+implementing the Zero-Inflated Generalized Dirichlet-Multinomial ("ZIGDM"),
+which addresses a known limitation of the plain Dirichlet-multinomial used in
+Step 4: it slightly underestimates the skew (the third statistical moment) of
+real Ribo-seq coverage.
 \itemize{
   \item \strong{Zero-inflation}: for every draw, each non-padding position
   is independently excluded (forced to a structural zero, i.e. its alpha

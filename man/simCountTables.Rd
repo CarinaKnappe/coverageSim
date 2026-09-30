@@ -32,8 +32,11 @@ Default 500. If integer, will create random ranges assigned to each transcript.}
 
 \item{m}{number of total samples, \code{m = length(libtypes) * length(conditions) * replicates}}
 
-\item{betaSD}{integer, default: 1 (log2 value). The standard deviation of dispersion between the conditions.
-The higher it is, the lower the correlation between conditions. Sane values: Between 1-3}
+\item{betaSD}{integer, default: 1 (log2 value). How strongly the conditions
+differ from one another: the standard deviation of the true log2 fold change
+per gene. At 0 the conditions are identical apart from noise; the higher it
+is, the more genes respond, and the less the conditions correlate. Sane
+values: between 1 and 3.}
 
 \item{betaLibSD}{named numeric vector, default: \code{c("RFP" = 1, "RNA" = 1, "CAGE" = 1, "PAS" = 1)}
 Standard deviation of dispersion, relative to the anchor distribution (log2 value).
@@ -58,10 +61,20 @@ The higher it is, the more variance counts of the genes can have. Sane values: B
 a ranged summarized experiment object
 }
 \description{
-Follows the rules defined in DESeq paper, using negative binomial distributions.
-The true values statistics are found in the meta columns.
+Step 2 of the simulation: decide how many reads each gene gets in each sample.
 }
 \details{
+Two genes that are equally expressed still end up with different counts, and
+by more than counting noise alone would explain: the same gene measured in two
+biological replicates varies more than repeated counting of one sample would.
+A negative binomial describes exactly that -- counting noise plus an extra,
+gene-specific spread -- which is why it is the standard model for this kind of
+data and what is used here, following the DESeq approach.
+
+The values actually drawn are kept in the metadata columns, so a later
+analysis can be compared against what was really simulated rather than against
+what was requested.
+
 Info about params:\cr
 - dispMeanRel: see DESeq2, section: Estimation of dispersions
 }

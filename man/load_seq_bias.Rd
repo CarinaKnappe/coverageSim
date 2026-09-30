@@ -12,10 +12,17 @@ load_seq_bias(
 )
 }
 \arguments{
-\item{type}{character, default: "AA". Sequence motif type, alternatives:
-codon}
+\item{type}{character, default "AA". How finely the sequence is described.
+\code{"codon"} gives one weight per triplet; \code{"AA"} pools the triplets
+that code for the same amino acid, which is steadier when a library is small
+but cannot distinguish synonymous codons.}
 
-\item{shift}{character, default "p-site". Alternative: "a-site"}
+\item{shift}{character, default "p-site". Alternative: "a-site". Which site
+inside the ribosome the weights were referenced to. The P-site holds the
+growing peptide chain and the A-site receives the incoming tRNA; they sit one
+codon apart, so a table referenced to one site is displaced by three
+nucleotides if used as though it were referenced to the other. Match this to
+wherever the simulation places its reads.}
 
 \item{dir}{Directory with sequence biases, default is internal path
 predefined estimators: system.file(package = "coverageSim", "extdata")}
@@ -31,10 +38,14 @@ inspection. Select one profile before passing a table loaded with
 a data.table of bias per sequence motif
 }
 \description{
-Should be Direclet alpha dispersion value tables per sequence motif.
-Stored in files called
-\code{paste0(type, "_bias_", shift, "_estimates_human.csv")} in the
-'dir' folder.
+Translation does not run at a constant speed: a ribosome dwells longer over
+some codons than others. These tables give one weight per sequence motif,
+measured from ten real human Ribo-seq libraries, and are used as the
+Dirichlet concentration that decides how strongly a position attracts reads.
+}
+\details{
+The tables are read from files named
+\code{paste0(type, "_bias_", shift, "_estimates_human.csv")} in \code{dir}.
 }
 \examples{
 load_seq_bias()

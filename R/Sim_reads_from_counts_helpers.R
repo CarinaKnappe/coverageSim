@@ -90,6 +90,11 @@ write_sam_library <- function(x, path, seqinfo = GenomeInfoDb::seqinfo(x)) {
   c(default = sam_path, sam = sam_path)
 }
 
+# Write the simulated reads as BAM, via a SAM file that is removed afterwards.
+#
+# BAM is compressed and indexed, so it is what downstream tools expect, but it is
+# written by first producing plain-text SAM and converting. The intermediate file
+# is deleted once the BAM exists, so a run leaves only the finished library.
 write_bam_library <- function(x, path, seqinfo = GenomeInfoDb::seqinfo(x)) {
   bam_path <- sub("\\.[^.]+$", ".bam", path)
   if (!grepl("\\.bam$", bam_path)) {
@@ -135,6 +140,13 @@ matrix_row_indices <- function(row_lengths) {
   )
 }
 
+# Lay the per-gene weight vectors into one rectangular matrix.
+#
+# Genes differ in length, but the sampler wants a matrix, so every row is as wide
+# as the longest gene and shorter genes are padded on the right. The padding is a
+# vanishingly small positive number rather than zero, because these entries are
+# used as Dirichlet concentrations and zero is not a valid one; the value is
+# small enough that padded positions receive no reads in practice.
 pack_alpha_rows <- function(alpha_rows, region_length_matrix, pad_value = 1e-24) {
   if (!length(alpha_rows)) {
     return(matrix(pad_value, nrow = 0L, ncol = ncol(region_length_matrix)))
@@ -349,6 +361,13 @@ assay_by_chromo <- function(assay, seqnamesPer) {
   }
 }
 
+# Check the caller's arguments before any work starts.
+#
+# Everything here is cheap to test and expensive to get wrong: a simulation that
+# fails after an hour because a region name was misspelled costs far more than
+# the check. The function deliberately runs inside its caller's environment, so
+# it sees that call's arguments directly and can also fill in values the caller
+# then uses -- uorf_ranges and regionsToSample are set here, not just verified.
 input_validation_controller <- function() {
   with(rlang::caller_env(), {
     message("- Validating input")
@@ -484,6 +503,13 @@ sequence_table_controller <- function() {
     }})
 }
 
+# Insist on exactly one weight profile before simulating.
+#
+# load_seq_bias(bias = "all") returns all ten measured libraries stacked in one
+# table, which is useful for comparing them in a figure but meaningless as a
+# simulation input: there is no way to tell which library a given position should
+# follow. Rejecting it here turns what would otherwise be a silently wrong
+# simulation into a message that names the alternative.
 validate_sequence_profile <- function(seq_bias) {
   if (is.null(seq_bias) || is.null(seq_bias$variable)) return(invisible(NULL))
   profiles <- unique(as.character(seq_bias$variable))
@@ -498,6 +524,25 @@ validate_sequence_profile <- function(seq_bias) {
   invisible(NULL)
 }
 
+# Look up a weight for every codon (or amino acid) in a region's actual sequence.
+#
+# Translation does not run at a constant speed. How long a ribosome dwells over a
+# codon depends on how readily the matching tRNA is available, so each codon
+# carries its own weight; `tAI` is that lookup table, one positive weight per
+# motif. This function reads the region's real sequence out of the genome,
+# replaces each motif by its weight, and hands back one weight vector per gene,
+# ready to be turned into per-nucleotide weights.
+#
+# Four positions are treated as motifs of their own, marked by the symbols #, %,
+# & and *: the start codon, the one after it, the one before the stop, and the
+# stop itself. Initiation and termination are slower and differently regulated
+# than elongation, so those positions need weights that are not tied to which
+# codon happens to sit there. The symbols only appear if the supplied table
+# defines them, so a table without them simply treats those positions normally.
+#
+# The checks here are deliberately strict and fail rather than guess: a motif
+# present in the sequence but missing from the table would otherwise silently
+# shift every later weight onto the wrong position.
 add_sequence_bias <- function(simGenome, dt_range, tAI, region_ranges, lengths, region) {
   validate_sequence_profile(tAI)
   tAI <- data.table::copy(tAI)
@@ -542,6 +587,8 @@ add_sequence_bias <- function(simGenome, dt_range, tAI, region_ranges, lengths, 
     stop("seq_bias contains missing alpha values for motifs in the ", region,
          " sequences.", call. = FALSE)
   }
+  # One weight per codon, but dt_range has one row per nucleotide, so every third
+  # row names the gene that codon belongs to.
   seq_alpha <- split(seq_alpha, dt_range$genes[c(T, F, F)])
   # seq_lengths <- lengths / 3
   # if (any(seq_lengths != as.integer(lengths/3))) stop("Mismatch of seqlength and divisor")
@@ -567,6 +614,37 @@ apply_autocorrelation_kernel <- function(signal, kernel) {
   }, numeric(1))
 }
 
+# Build the per-nucleotide weights that decide where reads land inside a region.
+#
+# The biology this walks through, in order. A ribosome does not sit evenly along a
+# transcript: it lingers at some codons and hurries past others, so each codon
+# attracts a different amount of signal. That is what `alpha_matrix` holds -- one
+# weight per codon, larger meaning more signal. Four things then happen to those
+# weights, and each has a physical reason:
+#
+#   1. Neighbouring codons influence each other. A ribosome covers roughly 30
+#      nucleotides, so what is happening a few codons away is not independent of
+#      the A-site. `seq_acf` spreads each codon's weight onto its neighbours.
+#   2. The ribosome steps one whole codon at a time, so signal piles up on one
+#      nucleotide of each triplet and not on the other two. The weights move from
+#      codon level to nucleotide level as (weight, 0, 0), the ideal triplet
+#      translocation pattern. This is what makes the 3-nt periodicity of
+#      Ribo-seq.
+#   3. RNase does not cut at exactly the same place every time. A read's signal
+#      therefore lands slightly before or after where the ribosome actually was,
+#      spread over a few neighbouring positions. `rnase_acf` is that spread.
+#   4. All of the above only redistributes signal; it must not create or destroy
+#      any. The last step rescales each region back to its original mean.
+#
+# Returns one numeric vector per region, used as the Dirichlet concentration
+# (alpha) when the region's read budget is distributed over its positions.
+#
+# A warning about `seq_acf`, because its meaning depends on its TYPE:
+#   * a numeric vector is used directly as kernel weights. A single number is
+#     therefore a kernel of width one, which averages each position with itself
+#     and changes nothing -- `seq_acf = 9` does NOT mean "9 codons each side".
+#   * an unevaluated expression (what `shapes(9)` returns) is evaluated below,
+#     and only that branch also applies the rescaling in step 1b.
 sim_sequence_bias <- function(ideal_coverage, lengths, alpha_matrix,
                               seq_acf = 9, rnase_acf =
                                 c(0.5,1,2,6,2,1,0.5)) {
@@ -578,9 +656,17 @@ sim_sequence_bias <- function(ideal_coverage, lengths, alpha_matrix,
     res <- lapply(lengths, function(x) eval(ideal_coverage))
     alpha_means <- rep(mean(res[[1]]), length(res))
   }
+  # Step 1: smear each codon's weight onto its neighbouring codons.
   if (is.numeric(seq_acf)) {
     res <- lapply(res, apply_autocorrelation_kernel, kernel = seq_acf)
   } else if (!is.null(seq_acf)) { # Higher order auto correlation
+    # Step 1b: sharpen the contrast between codons before smearing, so that
+    # smearing does not flatten the differences away entirely. Two properties of
+    # this step are worth knowing before changing anything here. It raises the
+    # weights to a fixed power and then divides by a quantile of themselves, so
+    # its effect on the spread depends on the gene; and the quantile is drawn at
+    # random on every call, so repeated runs do not produce identical alphas
+    # unless the random seed is fixed. Both are deliberate and long-standing.
     if (!is.null(alpha_matrix)) { # Rescale alpha values
       scalers <- unlist(lapply(res, function(x) {
         codon_extreme <- max(x) / median(x)
@@ -605,6 +691,11 @@ sim_sequence_bias <- function(ideal_coverage, lengths, alpha_matrix,
     res <- lapply(res, function(alpha_vec)
       eval(seq_acf))
   }
+  # Step 2: move from one weight per codon to one weight per nucleotide. The
+  # ribosome translocates a whole codon at a time, so all of a codon's weight is
+  # placed on its first nucleotide and the other two are left at zero. Reading
+  # across a transcript this gives the (1, 0, 0) pattern that produces Ribo-seq's
+  # 3-nt periodicity.
   if (!is.null(alpha_matrix)) { # Codon to NT level
     res <- lapply(res, function(x) {
       codon_ac_rnase_alphas_ideal <- rep(x, each = 3)
@@ -614,6 +705,12 @@ sim_sequence_bias <- function(ideal_coverage, lengths, alpha_matrix,
   }
 
 
+  # Step 3: spread each position's weight onto its immediate neighbours, because
+  # the enzyme cuts slightly before or after the ribosome's true position. The
+  # weights are applied centred, which is why an even number of them has no
+  # middle and would shift the whole profile by one nucleotide (see
+  # validate_rnase_bias()). The zero padding lets the first and last real
+  # positions be smeared like any other instead of being cut short.
   if (!is.null(rnase_acf)) { # Lower order auto correlation
     rnase2 <- rep(0, length(rnase_acf) - 1)
     res <- lapply(res, function(x) {
@@ -624,6 +721,12 @@ sim_sequence_bias <- function(ideal_coverage, lengths, alpha_matrix,
                         align = "center", fill = NA)
     })
   }
+  # Step 4: restore the scale. Smearing moved signal around; rescaling to the
+  # original mean makes sure it neither created nor destroyed any. Exact zeros
+  # are then nudged to a tiny positive number, because a Dirichlet concentration
+  # of zero is not a valid parameter -- it would assert that a position can never
+  # receive a read, which is stronger than "very unlikely" and is not what a
+  # weight of zero is meant to say here.
   # Cleanup
   res <- lapply(seq_along(res), function(i) {
     codon_ac_rnase_alphas <- res[[i]]
@@ -638,13 +741,23 @@ sim_sequence_bias <- function(ideal_coverage, lengths, alpha_matrix,
 
 #' Fetch internal sequence bias tables
 #'
-#' Should be Direclet alpha dispersion value tables per sequence motif.
-#' Stored in files called
-#' \code{paste0(type, "_bias_", shift, "_estimates_human.csv")} in the
-#' 'dir' folder.
-#' @param type character, default: "AA". Sequence motif type, alternatives:
-#' codon
-#' @param shift character, default "p-site". Alternative: "a-site"
+#' Translation does not run at a constant speed: a ribosome dwells longer over
+#' some codons than others. These tables give one weight per sequence motif,
+#' measured from ten real human Ribo-seq libraries, and are used as the
+#' Dirichlet concentration that decides how strongly a position attracts reads.
+#'
+#' The tables are read from files named
+#' \code{paste0(type, "_bias_", shift, "_estimates_human.csv")} in \code{dir}.
+#' @param type character, default "AA". How finely the sequence is described.
+#' \code{"codon"} gives one weight per triplet; \code{"AA"} pools the triplets
+#' that code for the same amino acid, which is steadier when a library is small
+#' but cannot distinguish synonymous codons.
+#' @param shift character, default "p-site". Alternative: "a-site". Which site
+#' inside the ribosome the weights were referenced to. The P-site holds the
+#' growing peptide chain and the A-site receives the incoming tRNA; they sit one
+#' codon apart, so a table referenced to one site is displaced by three
+#' nucleotides if used as though it were referenced to the other. Match this to
+#' wherever the simulation places its reads.
 #' @param dir Directory with sequence biases, default is internal path
 #' predefined estimators: system.file(package = "coverageSim", "extdata")
 #' @param bias The default, \code{"median"}, calculates the motif-wise median
@@ -659,6 +772,11 @@ sim_sequence_bias <- function(ideal_coverage, lengths, alpha_matrix,
 #' load_seq_bias()
 #' load_seq_bias(type = "codon")
 #' load_seq_bias(bias = "all")
+# The three aliases name the feature each library shows most strongly: R2 a
+# pronounced start-codon peak, R1 a pronounced stop-codon one, R10 the least
+# distinctive of the ten. "all" is rejected downstream by
+# validate_sequence_profile(), since a simulation cannot follow ten profiles at
+# once.
 load_seq_bias <- function(type = "AA", shift = "p-site",
                           dir = system.file(package = "coverageSim", "extdata"),
                           bias = "median") {
@@ -684,6 +802,17 @@ load_seq_bias <- function(type = "AA", shift = "p-site",
   dt[variable == profile, ]
 }
 
+# Combine the ten measured libraries into one representative weight table.
+#
+# The bundled codon and amino-acid weights were measured from ten real human
+# Ribo-seq libraries, R1 to R10. Any single one of them carries that experiment's
+# own quirks -- one has a pronounced start-codon peak, another an unusual stop
+# signal. Taking the median per motif keeps what the libraries agree on and drops
+# what only one of them shows, which is what makes it a sensible default.
+#
+# The median is taken motif by motif, so the result is not any one library but a
+# consensus. All ten must be present and describe the same motifs, or the
+# comparison would be between different things; that is what the checks enforce.
 median_sequence_profile <- function(profiles) {
   required_profiles <- paste0("R", seq_len(10L))
   selected <- profiles[variable %in% required_profiles]
@@ -710,6 +839,13 @@ median_sequence_profile <- function(profiles) {
   result[]
 }
 
+# Give each gene a margin at both ends so RNase smearing has somewhere to go.
+#
+# The smearing spreads a position's signal onto its neighbours. Near a gene's
+# first and last nucleotide some of those neighbours lie outside the gene, and
+# without room for them the outermost positions would be smeared with less signal
+# than the rest and end up artificially quiet. Adding as many extra positions at
+# each end as the kernel reaches lets every real position be treated alike.
 append_rnase_to_dt <- function(dt_range, lengths, rnase_bias) {
   gene_split_sites_end <- cumsum(lengths)
   gene_split_sites_start <- c(1, (gene_split_sites_end + 1)[-length(lengths)])
@@ -735,8 +871,7 @@ append_rnase_to_dt <- function(dt_range, lengths, rnase_bias) {
 #' smoothing applied along a gene: a rolling window (\code{autocor_window()},
 #' width \code{2*i + 1}, its \code{max.lag} argument) that locally correlates
 #' neighboring codon-bias values, modeling real tRNA/wobble-position sharing
-#' between nearby codons -- confirmed against the manuscript's own
-#' autocorrelation formula. Larger \code{i} smooths over a wider
+#' between nearby codons. Larger \code{i} smooths over a wider
 #' neighborhood, which matters most for sparsely sampled genes: at low read
 #' depth it noticeably increases how much reads cluster into a few
 #' positions rather than spreading out (higher skew and peak-to-median
@@ -757,6 +892,13 @@ shapes <- function(i = 9) {
 
 # Sequence lengths for SAM/BAM headers: use the reference FASTA where the
 # annotation carries none (a TxDb built from a GTF has NA lengths).
+# Recover chromosome lengths that the annotation did not carry.
+#
+# An alignment file has to declare how long each reference sequence is, but a
+# TxDb built from a GTF often does not know: a GTF describes features, not the
+# genome they sit on. The FASTA index does know, so the missing lengths are
+# filled in from there. Names the FASTA does not have are left as they are rather
+# than guessed.
 fill_missing_seqlengths <- function(seqinfo, fasta_file) {
   lengths <- GenomeInfoDb::seqlengths(seqinfo)
   missing <- is.na(lengths) | lengths <= 0L

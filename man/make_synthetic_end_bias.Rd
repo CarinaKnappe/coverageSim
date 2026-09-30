@@ -13,20 +13,30 @@ make_synthetic_end_bias(
 )
 }
 \arguments{
-\item{k}{integer k-mer length.}
+\item{k}{integer, how many bases at the end the bias depends on. 1 makes it
+depend on the final base alone, 2 on the final two, and so on.}
 
-\item{enriched_kmer}{optional k-mer to enrich.}
+\item{enriched_kmer}{optional k-mer to favour; every other k-mer stays
+neutral.}
 
-\item{enriched_weight}{weight for `enriched_kmer`.}
+\item{enriched_weight}{how strongly to favour it. 4 means fragments ending
+in that k-mer are four times as likely to survive as any other.}
 
-\item{depleted_kmer}{optional k-mer to deplete.}
+\item{depleted_kmer}{optional k-mer to disfavour.}
 
-\item{depleted_weight}{weight for `depleted_kmer`.}
+\item{depleted_weight}{how strongly to disfavour it; below 1.}
 }
 \value{
 a data.table with `kmer` and `weight` columns.
 }
 \description{
-The returned table can be passed as `table` in `five_prime_bias` or
-`three_prime_bias`. Weights are relative sampling weights; 1 is neutral.
+Library preparation is not indifferent to sequence: ligation and digestion
+favour some bases at a fragment's ends over others, so the observed ends are
+not a faithful record of where the enzyme cut. This builds a deliberately
+simple version of that effect, for testing whether an analysis notices it.
+}
+\details{
+The result is passed as `table` in `five_prime_bias` or `three_prime_bias`.
+Weights are relative: 1 is neutral, above 1 makes a fragment ending in that
+k-mer more likely to be kept, below 1 less likely.
 }

@@ -173,6 +173,20 @@ learning_cds_positions <- function(model, cds) {
   mapped[seq.int(1L, length(mapped), by = 3L)]
 }
 
+# Enumerate every fragment that could have been produced, read or not.
+#
+# This is what makes the whole estimate possible. Seeing that many fragments end
+# in G says nothing on its own -- perhaps G is simply common at that distance
+# from a ribosome. The question is whether G-ending fragments appear more often
+# than the sequence gave them the chance to. So for every ribosome site and every
+# fragment length, this records the fragment that would have resulted: where it
+# would start, which bases would sit at its two ends, and which codon the
+# ribosome would be over. Those are the opportunities; the reads that actually
+# occurred are counted against them later.
+#
+# A candidate is dropped if the fragment would run off the end of the transcript,
+# or if its sequence contains anything but A, C, G and T -- an unknown base
+# cannot be attributed to any motif.
 end_learning_opportunities <- function(models, cds, distribution, k) {
   data.table::rbindlist(lapply(models, function(model) {
     sites <- learning_cds_positions(model, cds[[model$transcript_id]])
@@ -201,6 +215,22 @@ end_learning_opportunities <- function(models, cds, distribution, k) {
   }))
 }
 
+# Measure how much more uneven the observed coverage is than pure chance allows.
+#
+# If reads fell on positions independently, their scatter around the expected
+# profile would be fixed by the counts alone. Real coverage is more uneven than
+# that, and how much more is exactly what the Dirichlet concentration encodes: a
+# large concentration means every library looks close to the average profile, a
+# small one means each library has its own spikes. This compares observed with
+# expected and turns the excess scatter into that concentration.
+#
+# Two edge cases are reported as such rather than as numbers to be trusted. If
+# the coverage is no more uneven than chance, the concentration is really
+# infinite, and the stand-in value is arbitrarily large. If it is as uneven as it
+# can possibly be, the concentration is really zero, and the stand-in is
+# arbitrarily small. Both are flagged in `boundary`; averaging over many
+# transcripts without excluding them would pull the result towards whichever
+# stand-in happens to be more common.
 dmn_alpha_moment <- function(observed, expected, nt_positions) {
   total <- sum(observed)
   sites <- length(observed)
@@ -316,6 +346,15 @@ estimate_dmn_alpha_from_opportunities <- function(opportunities, fit,
 # skipped intron as part of its footprint, so a read whose aligned blocks
 # never actually touch a transcript could still "overlap" it purely
 # because the transcript happens to fall inside the intron gap.
+# Record what fraction of the library's reads ended up in the measured frame.
+#
+# Despite the name, this no longer corrects anything. An earlier version divided
+# the concentration by this fraction, on the assumption that reads lost to
+# smearing had thinned the signal proportionally. That assumption does not hold:
+# dropping reads independently barely moves a moment-based estimate of
+# concentration. The fraction is still worth knowing -- a low value means most
+# reads were not usable for this estimate -- so it is reported as a diagnostic
+# and the concentration is left as measured.
 correct_dmn_alpha_scale_for_smearing <- function(dispersion, reads, distribution,
                                                   count_diagnostics, models) {
   candidates <- reads[fragment_length %in% distribution$fragment_length]
@@ -343,6 +382,18 @@ learn_coverage_structure <- function(sites, max_lag) {
   )
 }
 
+# Measure how far a position's excess signal carries to its neighbours.
+#
+# Real coverage is locally rough in a way that is not captured by per-codon
+# weights alone: where one position has more reads than expected, its neighbours
+# tend to as well. This measures that by taking what is left after the expected
+# profile is subtracted and asking how strongly those leftovers agree at
+# increasing distances.
+#
+# Only positive agreement is carried into the resulting kernel. A negative
+# correlation at some distance would mean neighbouring positions suppress each
+# other, which is not something smoothing can represent, so it is treated as no
+# relationship rather than inverted.
 estimate_residual_autocorrelation <- function(sites, max_lag) {
   data <- data.table::copy(sites)
   data.table::setorder(data, transcript_id, site_tx)
@@ -386,6 +437,14 @@ estimate_residual_autocorrelation <- function(sites, max_lag) {
   list(kernel = weights, diagnostics = diagnostics)
 }
 
+# Describe how spiky the coverage is, in numbers that can be compared later.
+#
+# These are the properties by which simulated coverage is judged against real
+# coverage. Each says something a single average cannot: what share of positions
+# are empty, how far the spread exceeds the mean, how much of a transcript's
+# signal sits in its single tallest position, how often a position exceeds what
+# chance would allow, and how long the empty stretches run. A simulation can
+# match the average profile closely and still be obviously wrong on all five.
 coverage_roughness_qc <- function(sites) {
   longest_run <- function(x) {
     runs <- rle(x == 0)
@@ -575,6 +634,20 @@ end_motif_levels <- function(k) {
 }
 
 # Aggregate identical features: zero-count opportunities still contribute exposure.
+# Arrange the opportunities into groups and index them by the motifs they carry.
+#
+# Opportunities are grouped by transcript and fragment length. Everything that
+# varies only between groups -- how strongly a transcript is expressed, how long
+# it is, how deeply the library was sequenced -- is then held fixed inside a
+# group, and cannot be mistaken for a sequence preference. That is the point of
+# grouping: what remains to explain within a group is the sequence and nothing
+# else.
+#
+# `index` records, for each opportunity, which three weights apply to it: one for
+# its 5' motif, one for its 3' motif, one for its codon. With `by_length`, each
+# fragment length gets its own set, since a protocol may treat lengths
+# differently; without it, the lengths share one set, which is steadier when
+# reads are few.
 end_learning_design <- function(opportunities, k, by_length) {
   data <- data.table::copy(opportunities)
   data[, group := paste(transcript_id, fragment_length, sep = ":")]
@@ -602,6 +675,21 @@ end_learning_design <- function(opportunities, k, by_length) {
        codon_labels = codon_labels)
 }
 
+# Fit the end preferences: how much each motif changes a fragment's chance of
+# being observed.
+#
+# Within each group the reads are treated as having been distributed over that
+# group's opportunities in proportion to exp(5' weight + 3' weight + codon
+# weight). Fitting therefore asks a single question: which weights make the
+# fragments that were actually read the likely ones? A weight of zero means the
+# motif makes no difference; the reported weights are exp(weight), so 1 is
+# neutral.
+#
+# Two numerical details. The largest value per group is subtracted before
+# exponentiating, which changes nothing mathematically but keeps the arithmetic
+# from overflowing on groups with many opportunities. And `ridge` pulls the
+# weights gently towards zero, which keeps a motif that appears only a handful of
+# times from being handed an extreme weight on almost no evidence.
 fit_end_preferences <- function(opportunities, k, by_length, ridge, maxit) {
   design <- end_learning_design(opportunities, k, by_length)
   data <- design$data

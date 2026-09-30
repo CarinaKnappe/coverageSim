@@ -24,7 +24,11 @@ learn_fragment_geometry(
 
 \item{cds}{Named GRangesList of complete CDS exons using the same identifiers.}
 
-\item{site_reference}{Either a_site (default) or p_site.}
+\item{site_reference}{Either a_site (default) or p_site. Which site inside
+the ribosome the learned offsets should point at: the P-site holds the
+growing peptide chain, the A-site receives the incoming tRNA, and they sit
+one codon apart. This only shifts the starting guess for the search; use
+whichever site the rest of the analysis works in.}
 
 \item{min_length, max_length}{Inclusive fragment-length limits.}
 
@@ -33,7 +37,9 @@ learn_fragment_geometry(
 \item{offset_search}{Number of nucleotides searched on each side of the
 default offset.}
 
-\item{min_mapq}{Minimum mapping quality. Default 20.}
+\item{min_mapq}{Minimum mapping quality. Default 20. Reads that could come
+from several places in the genome carry no reliable position, so including
+them would blur exactly the signal this function measures.}
 
 \item{offset_relative_threshold}{Numeric in (0, 1], default 1. For each
 fragment length, every candidate offset whose in-frame fraction is at
@@ -58,8 +64,18 @@ A simulator-ready fragment_geometry list. The diagnostics attribute
   contains every tested length/offset combination.
 }
 \description{
-For each sufficiently supported fragment length, candidate offsets around a
-biologically plausible default are scored by the fraction of uniquely
-projected CDS sites in frame zero. The selected length frequencies and
-offsets form a simulator-ready fragment geometry.
+A sequenced fragment is longer than the ribosome site it reports, so to know
+where the ribosome actually was you need to know how far into the fragment
+that site lies. This offset differs from one fragment length to the next and
+from one library preparation to the next, so it is worth measuring rather
+than assuming.
+}
+\details{
+The measurement uses the fact that ribosomes step one whole codon at a time:
+with the right offset, the shifted positions pile up in a single reading
+frame, and with a wrong one they scatter across all three. Each candidate
+offset is therefore scored by how large a share of reads it puts in frame
+zero, and the best-scoring one is kept. Note that this can only identify the
+frame, not the absolute offset -- two candidates a whole number of codons
+apart score alike.
 }

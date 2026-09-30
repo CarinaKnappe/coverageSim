@@ -23,8 +23,7 @@ Returns a quoted expression describing the codon-level autocorrelation
 smoothing applied along a gene: a rolling window (\code{autocor_window()},
 width \code{2*i + 1}, its \code{max.lag} argument) that locally correlates
 neighboring codon-bias values, modeling real tRNA/wobble-position sharing
-between nearby codons -- confirmed against the manuscript's own
-autocorrelation formula. Larger \code{i} smooths over a wider
+between nearby codons. Larger \code{i} smooths over a wider
 neighborhood, which matters most for sparsely sampled genes: at low read
 depth it noticeably increases how much reads cluster into a few
 positions rather than spreading out (higher skew and peak-to-median

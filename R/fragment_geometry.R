@@ -1,3 +1,13 @@
+# Fill in the defaults and reject settings that cannot mean anything.
+#
+# Callers supply only the fields they care about, so this completes the rest and
+# checks the result once, up front, rather than letting a bad value surface deep
+# inside a loop. Unknown field names are rejected rather than ignored: a
+# misspelled field would otherwise be silently dropped and the default used, so
+# the simulation would quietly not do what was asked.
+#
+# "adjust_offset" is an older name for "renormalize" and is accepted for
+# compatibility; the two do the same thing.
 normalize_fragment_geometry <- function(fragment_geometry) {
   defaults <- list(
     source = "default",
@@ -148,6 +158,19 @@ normalize_end_bias <- function(bias, bias_name) {
        strength = strength)
 }
 
+# How much a fragment's own end sequences change its chance of being sequenced.
+#
+# Ligation and digestion are not indifferent to sequence, so two fragments from
+# the same position can survive library preparation at different rates purely
+# because of the bases at their ends. The two ends are looked up independently
+# and their weights multiplied, since each end is handled by its own enzymatic
+# step.
+#
+# A table may give weights per fragment length or once for all lengths; the
+# length-specific entry wins where both exist. A k-mer the table does not mention
+# is treated as neutral rather than as impossible. `strength` scales the whole
+# effect as an exponent, so 0 disables the bias and 2 doubles its reach on the
+# log scale.
 end_bias_weight <- function(sequence, fragment_length,
                             five_bias, three_bias) {
   lookup <- function(kmer, length_value, bias) {
@@ -179,13 +202,22 @@ end_bias_kmer <- function(sequence, bias, from_end = FALSE) {
 
 #' Create a simple synthetic sequence-end bias profile.
 #'
-#' The returned table can be passed as `table` in `five_prime_bias` or
-#' `three_prime_bias`. Weights are relative sampling weights; 1 is neutral.
-#' @param k integer k-mer length.
-#' @param enriched_kmer optional k-mer to enrich.
-#' @param enriched_weight weight for `enriched_kmer`.
-#' @param depleted_kmer optional k-mer to deplete.
-#' @param depleted_weight weight for `depleted_kmer`.
+#' Library preparation is not indifferent to sequence: ligation and digestion
+#' favour some bases at a fragment's ends over others, so the observed ends are
+#' not a faithful record of where the enzyme cut. This builds a deliberately
+#' simple version of that effect, for testing whether an analysis notices it.
+#'
+#' The result is passed as `table` in `five_prime_bias` or `three_prime_bias`.
+#' Weights are relative: 1 is neutral, above 1 makes a fragment ending in that
+#' k-mer more likely to be kept, below 1 less likely.
+#' @param k integer, how many bases at the end the bias depends on. 1 makes it
+#'   depend on the final base alone, 2 on the final two, and so on.
+#' @param enriched_kmer optional k-mer to favour; every other k-mer stays
+#'   neutral.
+#' @param enriched_weight how strongly to favour it. 4 means fragments ending
+#'   in that k-mer are four times as likely to survive as any other.
+#' @param depleted_kmer optional k-mer to disfavour.
+#' @param depleted_weight how strongly to disfavour it; below 1.
 #' @return a data.table with `kmer` and `weight` columns.
 #' @export
 make_synthetic_end_bias <- function(k = 1L, enriched_kmer = "G",
@@ -307,6 +339,15 @@ resolve_fragment_distribution <- function(fragment_lengths, geometry) {
 # pass it). check_chromosome additionally rejects a transcript whose exons
 # span more than one chromosome, which only the geometry-learning callers
 # have historically required.
+# Precompute, once per transcript, everything the fragment code keeps needing.
+#
+# Placing fragments means repeatedly converting between genome and transcript
+# coordinates, which needs the exons in transcript order, where each one starts
+# along the transcript, and the total length. Working that out per fragment would
+# repeat it millions of times, so it is done once here and carried along.
+#
+# Exons are sorted by rank rather than by position, because on the minus strand
+# the first exon of the transcript has the highest genomic coordinate.
 build_transcript_models <- function(ranges, fasta_file = NULL,
                                     check_chromosome = FALSE) {
   sequences <- if (!is.null(fasta_file)) ORFik::txSeqsFromFa(ranges, fasta_file)
@@ -413,6 +454,18 @@ append_rnase_to_simulated_rpf_table <- function(dt_range, rnase_bias,
   }))
 }
 
+# Translate a fragment's position along the transcript into genome coordinates.
+#
+# A fragment is defined by where it sits in the spliced transcript, but an
+# alignment file describes the genome, where the same fragment may be split
+# across exons with introns in between. This walks the exons the fragment covers
+# and writes the result as a CIGAR string: stretches that match the genome as M,
+# the skipped introns as N.
+#
+# Minus-strand transcripts run against the genome, so their coordinates are
+# measured from the exon's far end; the pieces are then sorted into ascending
+# genomic order, because that is the order an alignment file expects regardless
+# of which strand the gene is on.
 transcript_fragment_alignment <- function(model, transcript_start,
                                           fragment_length) {
   transcript_end <- transcript_start + fragment_length - 1L
@@ -463,6 +516,20 @@ has_active_fragment_bias <- function(geometry) {
 }
 
 # Preserve region budgets when present; direct callers supply counts per transcript.
+# Decide which of the possible fragments actually get sequenced.
+#
+# Each signal position could give rise to fragments of several lengths and
+# several offsets. Every such candidate is weighted by three things multiplied
+# together: how likely that length-and-offset combination is at all, how much the
+# sequence at its ends helps or hinders it surviving library preparation, and how
+# much signal the position carries. The region's read budget is then drawn over
+# the candidates in those proportions, so the total comes out exactly right
+# rather than approximately.
+#
+# `joint` decides what competes with what. Drawing per transcript lets fragments
+# compete across the whole transcript, which is what happens in a real library;
+# drawing per position keeps each position's count fixed, which is useful when
+# the point is to reproduce a given profile exactly.
 allocate_fragment_candidates <- function(candidate_rows, signal_table, joint) {
   candidates <- data.table::rbindlist(candidate_rows, idcol = "signal_row")
   if (joint) {
@@ -492,6 +559,22 @@ allocate_fragment_candidates <- function(candidate_rows, signal_table, joint) {
   candidates
 }
 
+# Turn signal positions into whole fragments with real coordinates.
+#
+# Up to here a read is just a position: where the ribosome was. A sequenced
+# fragment is a stretch of RNA around that position, and how far it extends in
+# each direction depends on its length and on where inside it the ribosome site
+# falls. This picks a length and an offset for every read, checks the fragment
+# fits inside its transcript, and hands back fragments ready to be written out.
+#
+# Transcript ends are the awkward case: near them, some length-and-offset
+# combinations would run past the edge. Real libraries do produce reads there, so
+# refusing outright would lose signal that genuinely exists, but letting a
+# fragment hang over the edge would invent sequence. `boundary_action` chooses:
+# "error" stops, and "renormalize" keeps only the combinations that do fit and
+# redistributes the probability among them, nudging the offset to the nearest
+# feasible value when no length fits otherwise. The result is that positions near
+# an end draw from a narrower set of geometries, which is what really happens.
 make_simulated_rpf_fragments <- function(signal_table, transcript_models,
                                          fragment_lengths, fragment_geometry) {
   geometry <- normalize_fragment_geometry(fragment_geometry)

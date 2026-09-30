@@ -11,12 +11,19 @@
 #' @param out_dir = "~/Desktop/benchmark_ORFPrediction",
 #' @param genome_name = "Homo_sapiens_dummy",
 #' @param n = 500, integer, number of genes to create
-#' @param cds_length = rep.int(300, n)
-#' @param cds_exons = 2,
+#' @param cds_length = rep.int(300, n). Coding sequence length per gene, in
+#'   nucleotides. Must be divisible by 3, since a coding sequence is read in
+#'   whole codons.
+#' @param cds_exons = 2. How many exons the coding sequence is split into.
+#'   More than one means reads can cross a splice junction, which is what
+#'   exercises the spliced-alignment handling downstream.
 #' @param cds_intron_length = sample(c(30, 30), size = n, replace = TRUE),
 #' only used any cds_exons > 1. Is the size excluding the '5 GT motif.
-#' @param leader_length = rep.int(140, n),
-#' @param trailer_length = rep.int(105, n),
+#' @param leader_length = rep.int(140, n). Length of the 5' untranslated region
+#'   ahead of the start codon. This is where uORFs are placed, so a short
+#'   leader leaves little room for them.
+#' @param trailer_length = rep.int(105, n). Length of the 3' untranslated region
+#'   after the stop codon.
 #' @param gene_names = paste0("ENSGTEST1000", seq(n)),
 #' @param tx_names = paste0("ENSTTEST1000", seq(n)),
 #' @param seqnames Character vector of chromosome names. When NULL,
@@ -29,9 +36,15 @@
 #'   layout.
 #' @param chromosome_weights Optional sampling weights controlling how genes are
 #'   distributed among chromosomes. Must have one positive value per chromosome.
-#' @param flank_length = 305,
-#' @param strand = c("+", sample(c("+", "-"), n-1, replace = T)),
-#' @param start_codons = "ATG",
+#' @param flank_length = 305. Genomic sequence added on either side of each
+#'   gene. Reads never fall here, but the space means a gene is not flush
+#'   against a chromosome edge, where coordinate handling behaves differently.
+#' @param strand = c("+", sample(c("+", "-"), n-1, replace = T)). Which strand
+#'   each gene sits on. The default deliberately mixes both: minus-strand genes
+#'   run against the genome's coordinates and are a common source of
+#'   off-by-one and reverse-complement errors, so a test genome should contain
+#'   them.
+#' @param start_codons = "ATG". Codon that opens a coding sequence.
 #' @param stop_codons = c("TAG", "TGA", "TAA"), a non-empty subset (no
 #'   duplicates) of the standard genetic code's three stop codons. Use a
 #'   smaller subset to simulate stop-codon usage bias (e.g. \code{"TGA"}
@@ -40,13 +53,19 @@
 #'   default (standard) genetic code to recognize stops, so simulating an
 #'   organism/organelle with a different genetic code (e.g. mitochondrial,
 #'   where TGA is not a stop) is out of scope here.
-#' @param max_uorfs = 1,
-#' @param uorfs_can_overlap = TRUE,
+#' @param max_uorfs = 1. Upper limit on how many upstream ORFs a gene may get.
+#'   These are short reading frames in the leader that ribosomes can translate
+#'   before reaching the main coding sequence, so they carry real signal and are
+#'   not merely decoration.
+#' @param uorfs_can_overlap = TRUE. Whether two uORFs of the same gene may share
+#'   sequence.
 #' @param uorfs_can_overlap_cds = TRUE, logical/integer, 0/FALSE is no overlap, 1/TRUE is can overlap
 #' , 2 is must overlap.
 #' @param export_txdb logical, default TRUE. Export TxDb object of gtf. Highly adviced,
 #' but for testing you can turn it of to speed up raw output.
-#' @param uorf_max_length = 60
+#' @param uorf_max_length = 60. Longest a uORF may be, in nucleotides. Real
+#'   uORFs are short, which is part of what distinguishes them from a second
+#'   coding sequence.
 #' @param debug_on logical, default TRUE. Activate debug on suspected error. This can happen
 #' on uORF sampling, with corner case created transcripts. Useful to debug to understand why it failed.
 #' If you are not interested and you believe settings are valid, just rerun until it works.

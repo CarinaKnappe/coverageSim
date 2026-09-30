@@ -28,21 +28,40 @@ supported fragment_length.}
 
 \item{min_mapq}{Minimum mapping quality. Default 20.}
 
-\item{overlap_action}{How to handle a site in several supplied regions:
-priority (default), fractional, or exclude.}
+\item{overlap_action}{How to handle a site lying in several supplied
+regions. \code{"priority"} (default) credits it to whichever region comes
+first in \code{region_priority}, which suits the common case where one
+region is the interesting one. \code{"fractional"} splits the read evenly
+between them, which keeps the total honest when no region deserves
+precedence. \code{"exclude"} drops such sites entirely, which is the
+cautious choice when overlaps are rare and you would rather measure less
+than measure ambiguously.}
 
 \item{region_priority}{Region order used by overlap_action = "priority".}
 
-\item{pseudocount}{Non-negative count added to each region before calculating
-global and per-transcript proportions. Default 0.5.}
+\item{pseudocount}{Non-negative count added to each region before the
+proportions are calculated. Default 0.5. Without it, a region that happened
+to catch no reads would be given a proportion of exactly zero, which asserts
+that it can never receive one -- a much stronger claim than the data
+supports, and one that would make the simulation leave that region empty in
+every replicate.}
 }
 \value{
 A covsim_region_fit list with simulator-ready region_proportion,
   global and per-transcript estimates, diagnostics and provenance.
 }
 \description{
-Assigns each supported single-end fragment to one transcript and then to a
-leader, CDS, trailer or uORF using its length-specific reference-site offset.
-Ambiguous transcript assignments are excluded. Region overlaps are handled
-explicitly rather than counted more than once.
+How a library divides its reads between the coding sequence and the regions
+around it is one of its most visible properties, and it differs between
+protocols and cell states. This function measures that division so a
+simulation can reproduce it.
+}
+\details{
+Each fragment is first assigned to a transcript, then to a region, using the
+offset for its length so that the position counted is where the ribosome was
+rather than where the fragment started. Fragments that fit several
+transcripts equally well are dropped rather than guessed at. Regions can
+genuinely overlap -- a uORF lies inside the leader, and may run into the CDS
+-- so a position in more than one region has to be resolved deliberately
+instead of being counted twice.
 }
