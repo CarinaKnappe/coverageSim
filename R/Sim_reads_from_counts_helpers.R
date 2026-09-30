@@ -248,11 +248,13 @@ validate_rnase_bias <- function(rnase_bias) {
       return(paste0(
         label, " has ", length(kernel), " weights, which is an even number. The",
         " weights describe how far RNase digestion spreads a read's signal onto",
-        " neighbouring positions, so one of them has to sit on the read's own",
-        " position and the rest have to spread equally to either side -- that",
-        " needs an odd count. With an even count there is no middle weight, the",
-        " spread becomes one-sided and the simulated coverage would end up",
-        " shifted by one nucleotide."
+        " neighbouring positions, and they are applied centred on the read's own",
+        " position -- so one weight has to land on that position, which needs an",
+        " odd count. The weights themselves need not be symmetric: the default is",
+        " not, and setting the weights on one side to zero spreads the signal in",
+        " one direction only, which is a perfectly reasonable thing to ask for.",
+        " What an even count breaks is the centring, so the simulated coverage",
+        " would come out shifted by one nucleotide."
       ))
     }
     if (any(kernel < 0)) {
