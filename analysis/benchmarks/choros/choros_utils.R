@@ -1,3 +1,13 @@
+# Reimplementation in R of the choros bias model.
+#
+# Upstream: https://github.com/lareaulab/choros (MIT)
+#   Copyright (c) 2023 Liana Lareau
+#
+# This file reimplements the method rather than copying the code. The model and
+# the GC term follow the original closely; the fit uses fixest::fenegbin with
+# the transcript effect absorbed, where the original uses MASS::glm.nb with
+# transcript as a term. Cite the upstream work when reporting results.
+
 library(data.table)
 library(stringi)
 library(ggplot2)

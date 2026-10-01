@@ -285,16 +285,19 @@ test_that("coverageSim preprocessing restores zero BAM header lengths", {
   )
 })
 
-test_that("CHOROS README documents both server workflows and result layouts", {
+test_that("the CHOROS README names both workflows and the model selection rule", {
   readme_file <- testthat::test_path("..", "..", "analysis", "benchmarks", "choros", "README.md")
   expect_true(file.exists(readme_file))
   readme <- paste(readLines(readme_file, warn = FALSE), collapse = "\n")
   expect_match(readme, "SRR32491292.sorted.unique_nh1.ofst", fixed = TRUE)
-  expect_match(readme, "human_genome_only_covSim_v2/reads/RFP_WT_1.bam", fixed = TRUE)
-  expect_match(readme, "results/coverageSim_human_genome_only", fixed = TRUE)
+  expect_match(readme, "RFP_WT_1.bam", fixed = TRUE)
   expect_match(readme, "prepare_choros_real_human.R", fixed = TRUE)
   expect_match(readme, "prepare_choros_covsim_human_genome_only.R", fixed = TRUE)
   expect_match(readme, "BIC_full < BIC_base", fixed = TRUE)
+  # The two absolute /home/rstudio paths this used to require were removed from
+  # the README on purpose: the scripts resolve their locations from environment
+  # variables now, so a path from one machine no longer belongs in the docs.
+  expect_false(grepl("/home/rstudio", readme, fixed = TRUE))
 })
 
 test_that("coverageSim keeps all abundant configured read lengths", {

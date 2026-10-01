@@ -1,178 +1,93 @@
-# CHOROS analyses: real Human Ribo-seq and coverageSim control
+# choros benchmark: real human Ribo-seq against simulated coverage
 
-This directory contains two separate CHOROS workflows. The first analyzes real
-Human Ribo-seq as a positive control for sequence-dependent technical bias. The
-second analyzes a fully coverageSim-generated sample as a contrast without a
-deliberately simulated technical 5'- or 3'-end sequence bias.
+Two workflows that answer the same question from opposite directions. The first
+runs a real human Ribo-seq library, where sequence-dependent technical bias is
+expected and serves as a positive control. The second runs a fully simulated
+sample generated without any deliberate 5'- or 3'-end sequence bias, where the
+correct answer is that there is none to find.
 
-## Quick guide
+The upstream method is attributed in `../README.md`.
 
-| Analysis | Ribo-seq input | Preparation | Model | Results |
-|---|---|---|---|---|
-| Real Human | `SRR32491292.sorted.unique_nh1.ofst` | `prepare_choros_real_human.R` | `choros_real_human.R` | Directly below `/home/rstudio/choros_analyses/results/` |
-| coverageSim Human-genome-only | `/home/rstudio/rust/real_human_riboseq/human_genome_only_covSim_v2/reads/RFP_WT_1.bam` | `prepare_choros_covsim_human_genome_only.R` | `choros_covsim_human_genome_only.R` | `/home/rstudio/choros_analyses/results/coverageSim_human_genome_only/` |
+## The two workflows
 
-All four driver scripts source the shared file
-`/home/rstudio/choros_analyses/scripts/choros_utils.R`. Files ending in `.orig`
-are patch backups; R does not source them and they need not be copied.
+| | Real human | Simulated |
+|---|---|---|
+| Prepare | `prepare_choros_real_human.R` | `prepare_choros_covsim_human_genome_only.R` |
+| Fit | `choros_real_human.R` | `choros_covsim_human_genome_only.R` |
+| Input | `SRR32491292.sorted.unique_nh1.ofst` | `RFP_WT_1.bam` from a coverageSim run |
 
-## Server layout
+All four scripts source `choros_utils.R` from their own directory, so they work
+wherever this folder is placed. Preparation has to finish before the fitting
+script is started.
 
-```text
-/home/rstudio/choros_analyses/
-├── genome/
-│   ├── GRCh38.primary_assembly.genome.fa
-│   ├── GRCh38.primary_assembly.genome.fa.fai
-│   └── gencode.v49.primary_assembly.basic.annotation.gtf.db
-├── input/
-│   ├── SRR32491292.sorted.unique_nh1.bam
-│   └── SRR32491292.sorted.unique_nh1.ofst
-├── scripts/
-│   ├── choros_utils.R
-│   ├── prepare_choros_real_human.R
-│   ├── choros_real_human.R
-│   ├── prepare_choros_covsim_human_genome_only.R
-│   └── choros_covsim_human_genome_only.R
-└── results/
-    ├── prepared/
-    ├── tables/
-    ├── figures/
-    └── coverageSim_human_genome_only/
-        ├── prepared/
-        ├── tables/
-        └── figures/
-```
+## Running them
 
-`input/` is the organized location for copies of the real-Human inputs. The
-real-Human scripts resolve the active input through `CHOROS_REAL_BASE`, so that
-value must be recorded for each run. The completed control run recorded this
-source OFST in its summary:
-
-```text
-/home/rstudio/rust/real_human_riboseq/reads/SRR32491292.sorted.unique_nh1.ofst
-```
-
-The coverageSim BAM is intentionally kept with its simulation dataset rather
-than copied to `choros_analyses/input/`:
-
-```text
-/home/rstudio/rust/real_human_riboseq/human_genome_only_covSim_v2/reads/
-```
-
-## Running the real-Human control
+Nothing is hardcoded to a particular machine; the locations come from four
+environment variables.
 
 ```r
 Sys.setenv(
-  CHOROS_REAL_BASE = "/home/rstudio/rust/real_human_riboseq",
-  CHOROS_OUTPUT_DIR = "/home/rstudio/choros_analyses/results"
+  CHOROS_REAL_BASE  = "<dataset with reads/ and genome/>",   # real human
+  CHOROS_COVSIM_BASE = "<coverageSim run directory>",        # simulated
+  CHOROS_OUTPUT_DIR = "<where results should go>",
+  CHOROS_RUN_ID     = "RFP_WT_1"                             # which sample
 )
-source("~/choros_analyses/scripts/prepare_choros_real_human.R")
-source("~/choros_analyses/scripts/choros_real_human.R")
+source("prepare_choros_covsim_human_genome_only.R")
+source("choros_covsim_human_genome_only.R")
 ```
 
-Preparation must finish before the model script is started.
+A simulated dataset is expected to hold `reads/<run_id>.bam`,
+`genome/human_flavoured_sim.fasta` and `genome/human_flavoured_sim.gtf.db`.
+Runs whose genome files are named differently need
+`resolve_covsim_config()` adjusted.
 
-## Running the coverageSim contrast
+The preparation script repairs the zero chromosome lengths that a simulated BAM
+header can carry, taking the real lengths from the FASTA index, and validates
+every alignment against the reference. It reads the BAM and does not modify it.
 
-The coverageSim paths are fixed inside its scripts. No `Sys.setenv()` is
-required:
+## What the inputs contribute
 
-```r
-source("~/choros_analyses/scripts/prepare_choros_covsim_human_genome_only.R")
-source("~/choros_analyses/scripts/choros_covsim_human_genome_only.R")
-```
+The reference FASTA supplies the sequences for codons and for the 5'/3'
+fragment-end features; its index supplies the authoritative chromosome lengths.
+The transcript annotation supplies transcripts, CDSs and 5' leaders. The
+workflow keeps transcripts with at least 1 nt of leader and at least 231 nt of
+CDS, then the longest per gene.
 
-The preparation script repairs the invalid zero chromosome lengths in the
-simulated BAM header in memory from the FASTA index, then validates every
-alignment against GRCh38. It does not modify the BAM.
+## Stage 1 — preparation
 
-## Inputs and their roles
+1. load and align transcript, CDS and leader annotations;
+2. import the mapped reads;
+3. map each 5' read end into transcript coordinates;
+4. select read lengths — for real data by abundance and clear 3-nt frame
+   enrichment, for simulated data by keeping the configured lengths 28, 29 and
+   30 nt, since filtering those on observed frame would only confirm what was
+   put in;
+5. infer length-specific offsets from the observed peak at the start codon;
+6. construct frame-specific `d5`, `d3` and A-site codon indices;
+7. write a validated input RDS and QC tables.
 
-### Ribo-seq alignments
+`prepared/` then holds `*_choros_input.rds` (counts, sequences, geometry),
+`*_offsets.csv`, `*_periodicity_qc.csv` and `*_tis_profile.csv`.
 
-- Real Human uses the unique-mapper OFST derived from `SRR32491292`. OFST is
-  ORFik's compact representation of mapped Ribo-seq reads.
-- coverageSim imports `RFP_WT_1.bam` directly. Its reads and coverage were
-  generated by coverageSim; only the Human genome and annotation are real.
+## Stage 2 — model and correction
 
-### Reference genome
-
-`GRCh38.primary_assembly.genome.fa` supplies sequences for codons and 5'/3'
-RPF-end features. Its `.fai` supplies authoritative chromosome lengths.
-
-### Transcript annotation
-
-`gencode.v49.primary_assembly.basic.annotation.gtf.db` supplies transcripts,
-CDSs and 5' leaders. The workflow requires at least 1 nt of 5' leader and a CDS
-of at least 231 nt, then retains the longest transcript per gene.
-
-## Technical workflow
-
-Each analysis has two stages.
-
-### 1. Preparation
-
-The preparation script:
-
-1. loads and aligns transcript, CDS and leader annotations;
-2. imports mapped Ribo-seq reads;
-3. maps each 5' read end into transcript coordinates;
-4. selects read lengths: real Human requires abundance and clear 3-nt frame
-   enrichment, while coverageSim retains all sufficiently abundant configured
-   lengths 28, 29 and 30 nt;
-5. infers read-length-specific offsets from the observed TIS peak;
-6. constructs frame-specific `d5`, `d3` and A-site codon indices;
-7. saves a validated CHOROS input RDS and QC tables.
-
-The `prepared/` directory contains:
-
-- `*_choros_input.rds`: counts, transcript sequences and geometry;
-- `*_offsets.csv`: selected TIS peaks and base offsets;
-- `*_periodicity_qc.csv`: read counts and frame proportions by length;
-- `*_tis_profile.csv`: the 5'-end profile around the CDS start.
-
-### 2. CHOROS model and correction
-
-The model script:
-
-1. builds the zero-filled transcript/codon/geometry universe;
-2. selects the 250 highest-density training transcripts;
-3. fits a negative-binomial base model with codon effects, GC and geometry;
-4. fits a full model that also includes 5'/3' end sequences and their
+1. build the zero-filled transcript/codon/geometry universe;
+2. select the 250 highest-density training transcripts;
+3. fit a negative-binomial base model with codon effects, GC and geometry;
+4. fit a full model that also includes the 5'/3' end sequences and their
    interactions with `d5` and `d3`;
-5. selects the model with lower BIC;
-6. calculates correction factors and corrected counts;
-7. writes summary tables and diagnostic plots.
+5. keep the full model when `BIC_full < BIC_base`, otherwise the base model — on
+   data without end bias the base model wins, which is the correct negative
+   result;
+6. compute correction factors and corrected counts;
+7. write summary tables and diagnostic plots.
 
-## Result files
+## Results
 
-Each model run produces:
+- `*_choros_summary.csv` — read count, both BICs, selected model, absolute bias
+- `*_choros_corrected_counts.csv.gz` — raw and corrected footprint counts
+- `*_choros_diagnostics.pdf` — length and frame, geometry, start and stop
+  profiles, positional bias, metagene
 
-- `*_choros_summary.csv`: read count, BICs, selected model and absolute bias;
-- `*_choros_corrected_counts.csv.gz`: raw and corrected footprint counts;
-- `*_choros_diagnostics.pdf`: length/frame, geometry, TIS/TTS, positional-bias
-  and metagene plots.
-
-Real-Human outputs are directly under the top-level `tables/`, `figures/` and
-`prepared/` directories. coverageSim has the separate
-`results/coverageSim_human_genome_only/` subtree, preventing overwrites.
-
-## Interpreting the summary
-
-- Lower BIC is better. `BIC_full < BIC_base` means RPF-end sequence features
-  improve the model.
-- `selected_model = full` indicates detected sequence-dependent end effects;
-  it does not by itself prove that every effect is technical.
-- `abs_5p_bias` and `abs_3p_bias` are weighted standard deviations of log2
-  correction factors. A value of 1 represents roughly two-fold typical
-  variation attributable to that end.
-- `abs_total_bias` combines the 5' and 3' scores by Euclidean norm.
-
-Expected contrast: real Human Ribo-seq should show appreciable end bias and a
-clear full-model advantage, whereas the fully coverageSim-generated sample
-should have substantially weaker end-bias scores because coverageSim did not
-deliberately simulate sequence-dependent ligation bias.
-
-For coverageSim, `periodicity_qc.csv` still reports raw 5' frame proportions.
-They are diagnostic only: raw 5' frame is not the same as periodicity after the
-read-length- and frame-specific A-site offset has been applied.
+Each run writes below its own `CHOROS_OUTPUT_DIR`, so one analysis cannot
+overwrite another.
