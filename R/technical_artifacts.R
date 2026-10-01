@@ -53,6 +53,21 @@ resample_values <- function(values, size, replace = FALSE) {
   values[sample.int(length(values), size, replace = replace)]
 }
 
+# SAM reports SEQ relative to the genome's plus strand, while `sequence` is kept
+# in the direction the fragment was read off the transcript. A record placed on
+# the minus strand therefore stores the reverse complement. This mirrors how
+# `reference_sequence` is first built in fragment_geometry.R, and is needed again
+# whenever a record is moved to a location whose strand may differ.
+as_reference_orientation <- function(sequence, strand) {
+  flip <- strand == "-"
+  if (any(flip)) {
+    sequence[flip] <- as.character(Biostrings::reverseComplement(
+      Biostrings::DNAStringSet(sequence[flip])
+    ))
+  }
+  sequence
+}
+
 simulate_alignment_artifacts <- function(fragment_table, technical_artifacts) {
   settings <- normalize_technical_artifacts(technical_artifacts)
   primary <- expand_fragment_records(fragment_table)
@@ -94,9 +109,17 @@ simulate_alignment_artifacts <- function(fragment_table, technical_artifacts) {
       chosen <- resample_values(choices, settings$secondary_alignments,
                                 replace = length(choices) < settings$secondary_alignments)
       result <- data.table::copy(primary[chosen])
+      # A multimapper is one molecule reported at several locations, so every
+      # record has to carry that molecule's own sequence rather than the
+      # sequence of the fragment whose coordinates were borrowed. Both columns
+      # are set: `sequence` in read direction, and `reference_sequence` turned
+      # to the strand of this location, because that is the one written to SAM.
       result[, `:=`(
         qname = primary$qname[i],
         sequence = primary$sequence[i],
+        reference_sequence = as_reference_orientation(
+          rep(primary$sequence[i], .N), strand
+        ),
         flag = bitwOr(ifelse(strand == "+", 0L, 16L), 256L),
         nh = 1L + settings$secondary_alignments,
         is_secondary = TRUE,
