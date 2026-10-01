@@ -46,7 +46,7 @@
 #'   diagnostics$dmn_alpha_raw_scale (currently identical to dmn_alpha_scale
 #'   itself -- no automatic correction for a low in-frame fraction is
 #'   applied, since dividing by it has no general statistical justification;
-#'   see correct_dmn_alpha_scale_for_smearing()'s comment for why an earlier
+#'   see record_in_frame_fraction()'s comment for why an earlier
 #'   version doing that was reverted).
 #' @export
 learn_end_bias <- function(bam, fasta, transcripts, cds, fragment_geometry,
@@ -82,7 +82,7 @@ learn_end_bias <- function(bam, fasta, transcripts, cds, fragment_geometry,
   dispersion <- estimate_dmn_alpha_from_opportunities(
     counted$data, fit, dmn_min_reads, dmn_min_sites
   )
-  dispersion <- correct_dmn_alpha_scale_for_smearing(
+  dispersion <- record_in_frame_fraction(
     dispersion, observed$reads, distribution, counted$diagnostics, models
   )
   structure <- learn_coverage_structure(dispersion$sites, acf_max_lag)
@@ -355,7 +355,7 @@ estimate_dmn_alpha_from_opportunities <- function(opportunities, fit,
 # concentration. The fraction is still worth knowing -- a low value means most
 # reads were not usable for this estimate -- so it is reported as a diagnostic
 # and the concentration is left as measured.
-correct_dmn_alpha_scale_for_smearing <- function(dispersion, reads, distribution,
+record_in_frame_fraction <- function(dispersion, reads, distribution,
                                                   count_diagnostics, models) {
   candidates <- reads[fragment_length %in% distribution$fragment_length]
   supported <- if (nrow(candidates)) {

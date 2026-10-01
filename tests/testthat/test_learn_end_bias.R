@@ -182,7 +182,7 @@ test_that("the dmn_alpha in-frame-fraction diagnostic ignores off-transcript rea
   # was on the exact codon boundary and usable).
   count_diagnostics <- c(used = 10L, unmatched_or_ambiguous = 5L + 100L + 999L + 100L)
 
-  result <- correct_dmn_alpha_scale_for_smearing(
+  result <- record_in_frame_fraction(
     dispersion, reads, distribution, count_diagnostics, models
   )
   expect_equal(result$raw_scale, 0.065)

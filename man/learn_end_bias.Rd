@@ -76,7 +76,7 @@ A list containing five_prime_bias, three_prime_bias, codon_bias and
   diagnostics$dmn_alpha_raw_scale (currently identical to dmn_alpha_scale
   itself -- no automatic correction for a low in-frame fraction is
   applied, since dividing by it has no general statistical justification;
-  see correct_dmn_alpha_scale_for_smearing()'s comment for why an earlier
+  see record_in_frame_fraction()'s comment for why an earlier
   version doing that was reverted).
 }
 \description{

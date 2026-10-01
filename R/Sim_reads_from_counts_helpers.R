@@ -700,9 +700,9 @@ sim_sequence_bias <- function(ideal_coverage, lengths, alpha_matrix,
   # 3-nt periodicity.
   if (!is.null(alpha_matrix)) { # Codon to NT level
     res <- lapply(res, function(x) {
-      codon_ac_rnase_alphas_ideal <- rep(x, each = 3)
-      codon_ac_rnase_alphas_ideal[seq(codon_ac_rnase_alphas_ideal) %% 3 %in% c(2,0)] = 0
-      codon_ac_rnase_alphas_ideal
+      weights_per_nucleotide <- rep(x, each = 3)
+      weights_per_nucleotide[seq(weights_per_nucleotide) %% 3 %in% c(2,0)] = 0
+      weights_per_nucleotide
     })
   }
 
@@ -714,9 +714,9 @@ sim_sequence_bias <- function(ideal_coverage, lengths, alpha_matrix,
   # validate_rnase_bias()). The zero padding lets the first and last real
   # positions be smeared like any other instead of being cut short.
   if (!is.null(rnase_acf)) { # Lower order auto correlation
-    rnase2 <- rep(0, length(rnase_acf) - 1)
+    edge_padding <- rep(0, length(rnase_acf) - 1)
     res <- lapply(res, function(x) {
-      x <- c(rnase2, x, rnase2)
+      x <- c(edge_padding, x, edge_padding)
       frollapply_compat(x,
                         window = length(rnase_acf),
                         FUN = function(i) sum(i*rnase_acf),
