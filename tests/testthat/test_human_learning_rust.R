@@ -1,25 +1,42 @@
-test_that("human-learning RUST workflow is syntactically valid and uses every scenario", {
-  scripts <- c(
+human_learning_scripts <- function() {
+  c(
     testthat::test_path("..", "..", "analysis", "benchmarks", "rust", "run_human_learning_rust.py"),
     testthat::test_path("..", "..", "analysis", "benchmarks", "rust", "plot_human_learning_rust.py")
   )
-  for (script in scripts) {
+}
+
+test_that("human-learning RUST workflow is syntactically valid", {
+  skip_if(nchar(Sys.which("python3")) == 0, "python3 is unavailable")
+  for (script in human_learning_scripts()) {
     status <- system2("python3", c("-m", "py_compile", shQuote(script)))
     expect_equal(status, 0L)
   }
+})
+
+test_that("human-learning RUST workflow keeps its own settings", {
+  scripts <- human_learning_scripts()
   run_script <- readLines(scripts[1], warn = FALSE)
-  settings <- data.table::fread(testthat::test_path(
-    "..", "..", "..", "coverageSim_data", "runs", "2026-09-11_human-learning",
-    "scenario_settings.tsv"
-  ))
-  for (scenario in settings$scenario) {
-    expect_true(any(grepl(paste0('"', scenario, '"'), run_script, fixed = TRUE)))
-  }
   expect_true(any(grepl('"28"', run_script, fixed = TRUE)))
   expect_true(any(grepl("offset15_only=True", run_script, fixed = TRUE)))
   plot_script <- readLines(scripts[2], warn = FALSE)
   expect_true(any(grepl("LEFT_YLIM = (-3.0, 2.0)", plot_script, fixed = TRUE)))
   expect_true(any(grepl("RIGHT_YLIM = (0.0, 1.0)", plot_script, fixed = TRUE)))
+})
+
+test_that("the workflow names every scenario of the stored run", {
+  # The stored runs live beside the repository, not inside it, so this cross
+  # check is only possible where that data is present. A fresh checkout has the
+  # scripts but not the runs, and skips instead of failing.
+  settings_file <- testthat::test_path(
+    "..", "..", "..", "coverageSim_data", "runs", "2026-09-11_human-learning",
+    "scenario_settings.tsv"
+  )
+  skip_if_not(file.exists(settings_file), "Stored human-learning run is unavailable")
+  settings <- data.table::fread(settings_file)
+  run_script <- readLines(human_learning_scripts()[1], warn = FALSE)
+  for (scenario in settings$scenario) {
+    expect_true(any(grepl(paste0('"', scenario, '"'), run_script, fixed = TRUE)))
+  }
 })
 
 test_that("optional upstream RUST run covers all human-learning simulations", {
