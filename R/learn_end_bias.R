@@ -224,13 +224,20 @@ end_learning_opportunities <- function(models, cds, distribution, k) {
 # small one means each library has its own spikes. This compares observed with
 # expected and turns the excess scatter into that concentration.
 #
-# Two edge cases are reported as such rather than as numbers to be trusted. If
-# the coverage is no more uneven than chance, the concentration is really
-# infinite, and the stand-in value is arbitrarily large. If it is as uneven as it
-# can possibly be, the concentration is really zero, and the stand-in is
-# arbitrarily small. Both are flagged in `boundary`; averaging over many
-# transcripts without excluding them would pull the result towards whichever
-# stand-in happens to be more common.
+# Two edge cases have no finite answer, and both are named in `boundary` so a
+# caller can see them. If the observed coverage is no more uneven than chance
+# allows, the concentration is really infinite, and the stand-in is arbitrarily
+# large. The opposite case is easy to misread: it is not reached by coverage
+# being especially uneven, but by the observed counts departing from the
+# expected profile by more than the read count can account for, which a wrong
+# profile can cause as readily as genuine spikiness. There the concentration is
+# really zero and the stand-in is arbitrarily small.
+#
+# On real human data neither case occurs anywhere near: with a few thousand
+# reads per transcript the lower case would need the departure to grow several
+# hundredfold, and deleting the codon and end-bias profiles outright moves it by
+# under a quarter. The stand-ins therefore order the transcripts sensibly for a
+# median, and they are left in it.
 dmn_alpha_moment <- function(observed, expected, nt_positions) {
   total <- sum(observed)
   sites <- length(observed)

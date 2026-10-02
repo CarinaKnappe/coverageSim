@@ -550,7 +550,19 @@ draw_site_probabilities <- function(weights, dirichlet = FALSE,
     # coverage.
     log_weights <- log(stats::rgamma(length(alpha), alpha + 1)) +
       log(stats::runif(length(alpha))) / alpha
-    weights[positive] <- exp(log_weights - max(log_weights))
+    shift <- max(log_weights)
+    if (is.finite(shift)) {
+      weights[positive] <- exp(log_weights - shift)
+    } else {
+      # Below roughly 1e-300 the division by alpha overflows and every term
+      # becomes -Inf, so there is no longer a largest one to divide through.
+      # That is the limit the Dirichlet approaches as the concentration goes to
+      # zero: a single position takes the whole region's coverage, and it is
+      # picked with probability proportional to its own weight. Taking that
+      # limit explicitly keeps the result a valid distribution instead of NaN.
+      winner <- sample.int(length(alpha), 1L, prob = alpha / sum(alpha))
+      weights[positive] <- replace(numeric(length(alpha)), winner, 1)
+    }
   }
   weights / sum(weights)
 }

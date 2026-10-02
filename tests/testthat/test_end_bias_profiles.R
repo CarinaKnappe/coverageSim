@@ -125,6 +125,30 @@ test_that("latent coverage probabilities retain structural zeros and DMN variati
   expect_equal(sum(draw_site_probabilities(c(1e-24, 1e-24), TRUE)), 1)
 })
 
+test_that("a concentration too small to divide by still yields a distribution", {
+  # Dividing by a concentration this small overflows, so every position's log
+  # weight becomes -Inf and the usual rescaling has nothing to rescale against.
+  # The honest answer in that limit is the one the Dirichlet converges to: the
+  # whole region's coverage on a single position, picked in proportion to the
+  # weights. What must not happen is NaN, which would travel silently into the
+  # simulated coverage.
+  set.seed(5)
+  for (concentration in c(1e-310, 1e-320, 5e-324)) {
+    drawn <- draw_site_probabilities(rep(concentration, 9), TRUE)
+    expect_false(anyNA(drawn))
+    expect_equal(sum(drawn), 1)
+    expect_equal(sum(drawn > 0), 1L)
+  }
+  # Structural zeros stay zero even in that limit.
+  weighted <- draw_site_probabilities(c(1e-320, 0, 1e-320), TRUE)
+  expect_equal(weighted[2], 0)
+  expect_equal(sum(weighted), 1)
+  # The position is chosen in proportion to the weights, not uniformly.
+  set.seed(11)
+  winners <- replicate(2000, which.max(draw_site_probabilities(c(1e-320, 3e-320), TRUE)))
+  expect_equal(mean(winners == 2L), 0.75, tolerance = 0.04)
+})
+
 test_that("joint end selection uses biological ends on the minus strand", {
   fixture <- end_selection_fixture()
   fixture$models$tx$strand <- "-"
