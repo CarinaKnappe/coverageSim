@@ -201,3 +201,41 @@ test_that("learn_end_bias() does not correct dmn_alpha_scale when nothing was ex
   expect_equal(fit$diagnostics$dmn_alpha_in_frame_fraction, 1)
   expect_equal(fit$diagnostics$dmn_alpha_raw_scale, fit$dmn_alpha_scale)
 })
+
+test_that("too few reads leaves the concentration unset instead of inventing one", {
+  # The concentration governs how uneven simulated coverage becomes. When no
+  # transcript carries enough reads to measure it, the estimator must say so and
+  # leave it unset: a filled-in number would be stored in the fit and reused
+  # with nothing left to show that it was never measured. The profiles learned
+  # from the same reads are a separate matter and stay available.
+  neutral <- function(kmers) {
+    list(table = data.table::data.table(kmer = kmers, weight = 1), strength = 1)
+  }
+  thin <- data.table::rbindlist(lapply(c("tx1", "tx2"), function(id) {
+    data.table::data.table(
+      transcript_id = id, site_tx = 1:6, fragment_length = 28L,
+      codon = "AAA", five = "AA", three = "TT", count = c(1L, 0L, 2L, 0L, 1L, 0L)
+    )
+  }))
+  fit <- list(
+    five_prime_bias = neutral("AA"), three_prime_bias = neutral("TT"),
+    diagnostics = list(
+      codon_weights = data.table::data.table(codon = "AAA", weight = 1)
+    )
+  )
+  expect_warning(
+    result <- estimate_dmn_alpha_from_opportunities(
+      thin, fit, min_reads = 50L, min_sites = 20L
+    ),
+    "could not be measured"
+  )
+  expect_true(is.na(result$scale))
+  # The warning names the thresholds and how far the data fell short, so the
+  # reader can tell whether a deeper library would help.
+  expect_warning(
+    estimate_dmn_alpha_from_opportunities(thin, fit, 50L, 20L),
+    "the deepest had"
+  )
+  # No transcript was usable, and that is recorded rather than hidden.
+  expect_equal(result$diagnostics[usable == TRUE, .N], 0L)
+})

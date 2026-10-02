@@ -285,13 +285,32 @@ resolve_dmn_alpha_scale <- function(scale, seq_bias) {
     validate_dmn_alpha_scale(scale)
     return(scale)
   }
-  learned <- if (!is.null(seq_bias) && "dmn_alpha_scale" %in% names(seq_bias)) {
+  # Two situations look the same here and must not be treated the same. A table
+  # without the column at all was never meant to carry a concentration -- the
+  # bundled tables and hand-built ones are like that -- and the historical
+  # default of 1 is right for them. A table that has the column but no value in
+  # it comes from learning that ran and could not measure the concentration,
+  # and silently simulating with 1 would make the spikiness decision for the
+  # caller while looking like a measurement.
+  carries_column <- !is.null(seq_bias) && "dmn_alpha_scale" %in% names(seq_bias)
+  learned <- if (carries_column) {
     unique(seq_bias$dmn_alpha_scale[!is.na(seq_bias$dmn_alpha_scale)])
   } else numeric()
   if (length(learned) > 1L) {
     stop("seq_bias contains multiple dmn_alpha_scale values", call. = FALSE)
   }
-  if (!length(learned)) return(1)
+  if (!length(learned)) {
+    if (carries_column) {
+      stop("seq_bias was learned without a usable coverage concentration: the ",
+           "reads it was learned from were too few to measure how uneven the ",
+           "coverage is. Simulating anyway would mean choosing that unevenness ",
+           "silently, so set dmn_alpha_scale yourself to say what it should be ",
+           "-- 1 gives the unlearned default, smaller values spikier coverage ",
+           "-- or learn again from a more deeply sequenced library.",
+           call. = FALSE)
+    }
+    return(1)
+  }
   validate_dmn_alpha_scale(learned)
   learned
 }

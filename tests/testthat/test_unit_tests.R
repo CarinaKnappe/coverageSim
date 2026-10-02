@@ -176,3 +176,24 @@ test_that("libFormats validation accepts supported formats and rejects others", 
   expect_error(validate_lib_formats(list(RFP = "cram")))
   expect_error(resolve_export_format(list(RFP = c("ofst", "bam")), "RFP"))
 })
+
+test_that("an unmeasured coverage concentration is refused, not replaced by a default", {
+  # A seq_bias table that never carried the column was not meant to: the bundled
+  # tables are like that, and the historical default of 1 is right for them.
+  without_column <- data.frame(seqs = "AAA", alpha = 1)
+  expect_equal(resolve_dmn_alpha_scale(NULL, without_column), 1)
+  expect_equal(resolve_dmn_alpha_scale(NULL, NULL), 1)
+
+  # A table that has the column but nothing in it is a different thing: learning
+  # ran and the reads were too few to measure how uneven the coverage is. Using
+  # 1 there would decide the spikiness of the simulation while looking like a
+  # measurement, so it has to be refused.
+  unmeasured <- data.frame(seqs = "AAA", alpha = 1, dmn_alpha_scale = NA_real_)
+  expect_error(resolve_dmn_alpha_scale(NULL, unmeasured),
+               "too few to measure how uneven")
+  # The refusal says what to do, and doing it works.
+  expect_equal(resolve_dmn_alpha_scale(0.5, unmeasured), 0.5)
+
+  measured <- data.frame(seqs = "AAA", alpha = 1, dmn_alpha_scale = 0.063)
+  expect_equal(resolve_dmn_alpha_scale(NULL, measured), 0.063)
+})

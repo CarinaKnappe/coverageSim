@@ -315,8 +315,25 @@ estimate_dmn_alpha_from_opportunities <- function(opportunities, fit,
   }, by = transcript_id]
   usable <- diagnostics[usable == TRUE, dmn_alpha_scale]
   if (!length(usable)) {
-    warning("DMN concentration could not be estimated; using fallback 1")
-    scale <- 1
+    # Nothing is invented here. A concentration decides how spiky the simulated
+    # coverage becomes, so filling it in with a plausible-looking number would
+    # quietly make that decision on the caller's behalf, and the number would
+    # then be stored in the fit and reused for good with nothing left to show it
+    # was never measured. The rest of this fit -- the codon and end-bias
+    # profiles -- is estimated from the same reads and stays usable, so the
+    # concentration alone is left unset.
+    best <- diagnostics[which.max(reads)]
+    scale <- NA_real_
+    warning(
+      "The coverage concentration could not be measured: no transcript reached ",
+      min_reads, " reads on at least ", min_sites, " sites",
+      if (nrow(best)) paste0(" (the deepest had ", best$reads, " reads on ",
+                             best$sites, " sites)") else "",
+      ". It is left unset rather than filled in with a stand-in, because the ",
+      "value decides how uneven the simulated coverage becomes. The codon and ",
+      "end-bias profiles in this fit are unaffected. To simulate, pass ",
+      "dmn_alpha_scale explicitly, or learn from a more deeply sequenced library."
+    )
   } else {
     scale <- stats::median(usable)
   }
