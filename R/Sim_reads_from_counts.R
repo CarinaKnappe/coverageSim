@@ -150,10 +150,12 @@
 #' distribution; same distribution as \code{dmn_family = "dirichlet"}, but
 #' not the same random numbers for a given seed). Only used when
 #' \code{dmn_family = "generalized"} (but always validated); see
-#' \code{rgdirmnom()}. Unlike
-#' \code{dmn_alpha_scale}, values away from 1 also shift the expected
-#' per-position coverage slightly, not only its variance -- see the Details
-#' section of \code{rgdirmnom()}.
+#' \code{rgdirmnom()}. Unlike \code{dmn_alpha_scale}, values away from 1
+#' reshape the expected per-position coverage rather than only its variance,
+#' and the effect is large: at 2.2 the tallest position of a realistic profile
+#' keeps under half of its expected share, and coverage drifts from the start
+#' of each region towards its end. Keep it at 1 unless that reshape is the
+#' goal; the Details section of \code{rgdirmnom()} gives the numbers.
 #' @param dmn_zero_inflation numeric in [0, 1), default 0 (off). Probability
 #' that an eligible Step-4 position is forced to a structural zero for a
 #' given simulated library, layered on top of the usual DMN sampling; see

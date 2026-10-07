@@ -666,9 +666,14 @@ apply_autocorrelation_kernel <- function(signal, kernel) {
 #     and changes nothing -- `seq_acf = 9` does NOT mean "9 codons each side".
 #   * an unevaluated expression (what `shapes(9)` returns) is evaluated below,
 #     and only that branch also applies the rescaling in step 1b.
+# The rnase_acf default has to match simNGScoverage()'s rnase_bias default,
+# because that is the value every normal call passes in. Two different defaults
+# for the same quantity are a trap: a script calling this function directly
+# would get a different amount of smearing than the simulation it is meant to
+# mirror, with nothing in the output to show it.
 sim_sequence_bias <- function(ideal_coverage, lengths, alpha_matrix,
                               seq_acf = 9, rnase_acf =
-                                c(0.5,1,2,6,2,1,0.5)) {
+                                c(0.5, 2, 1, 10, 2, 1, 0.5)) {
   if (!is.null(alpha_matrix)){
     # res <- as.data.table(t(alpha_matrix))
     res <- alpha_matrix

@@ -86,13 +86,27 @@ directly and is therefore exactly backward compatible with all existing
 callers.
 }
 \details{
-Note on \code{gdm_scale}: unlike \code{dmn_alpha_scale} (which only
-changes variance, never the expected coverage), \code{gdm_scale != 1}
-also shifts the expected per-position proportions slightly, because it
-changes how the "remaining probability mass" is split at each step of the
-stick-breaking chain. At \code{gdm_scale = 1} this does not apply (exact
-reduction to the standard Dirichlet). Treat \code{gdm_scale} as a reshape
-control, not a pure variance knob, when moving it away from 1.
+Note on \code{gdm_scale}: at 1 it is an exact reduction to the standard
+Dirichlet and changes nothing. Away from 1 it does not merely add variance,
+it reshapes the expected per-position profile, and the effect is large. The
+stick-breaking chain walks the positions in order and splits
+whatever probability mass is left at each step, which has two consequences
+worth knowing before the value is moved:
+\itemize{
+  \item \strong{Peaks are flattened.} On a profile of 200 positions drawn
+  from real learned weights, \code{gdm_scale = 2.2} left the tallest
+  position with under half of its expected share (0.052 expected against
+  0.023 drawn), and \code{gdm_scale = 3} with about a third.
+  \item \strong{Mass drifts from the start of the vector towards its end},
+  because later positions inherit the remainder. On a flat profile carrying
+  one raised position, the neighbours before it fell to roughly half the
+  level of the neighbours after it -- a gradient along the position index
+  that has nothing to do with what sits at those positions.
+}
+So \code{gdm_scale} does raise the third moment of the drawn counts, but it
+pays for that with the shape of the profile it was given. For simulating a
+named biological effect it is therefore not the right control; leave it at 1
+unless the reshape itself is what is wanted.
 }
 \examples{
 alpha <- matrix(c(5, 3, 1, 1e-24, 2, 2, 2, 2), nrow = 2, byrow = TRUE)
