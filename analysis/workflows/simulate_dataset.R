@@ -66,14 +66,44 @@ dir.create(file.path(out_base, "experiment"), recursive = TRUE, showWarnings = F
 write_code_version(out_base)
 
 seed <- as.integer(Sys.getenv("COVSIM_BIGDATA_SEED", unset = "42"))
+
+# Fragment lengths and read depth are the two settings most often varied between
+# runs, so they are read from the environment rather than edited in place.
+#
+# The default range is wider than one ribosome's footprint on purpose. A real
+# library does not produce a single length: digestion leaves a spread, and
+# default_fragment_distribution() weights that spread with a bell curve centred
+# on 29 nt. The range also matters for the offset, because the distance from a
+# fragment's 5' end to the decoding site grows with length -- 14 nt up to 27 nt,
+# 15 nt for 28 to 30, 16 nt above that. A run restricted to 28:30 therefore has
+# one offset for every fragment and cannot show that relationship at all.
+read_length_range <- Sys.getenv("COVSIM_BIGDATA_READ_LENGTHS", unset = "26:33")
+read_lengths <- eval(parse(text = read_length_range))
+if (!is.numeric(read_lengths) || !length(read_lengths) ||
+    any(!is.finite(read_lengths)) || any(read_lengths < 1)) {
+  stop("COVSIM_BIGDATA_READ_LENGTHS must evaluate to positive numbers, e.g. 26:33")
+}
+read_lengths <- as.integer(read_lengths)
+
+# Mean expression on a log scale; it sets how many reads each transcript gets.
+# 6 leaves roughly 125 reads per transcript at 300 genes, which is enough to see
+# periodicity but too thin for choros, which trains on the 250 densest
+# transcripts. 10 gives roughly 970.
+intercept_mean <- as.numeric(Sys.getenv("COVSIM_BIGDATA_INTERCEPT_MEAN",
+                                        unset = "6"))
+if (!is.finite(intercept_mean)) {
+  stop("COVSIM_BIGDATA_INTERCEPT_MEAN must be one finite number")
+}
 set.seed(seed)
 
 data.table::fwrite(
   data.table::data.table(
     setting = c(
-      "n_genes", "seed", "bias_profile", "bias_profile_id", "dmn_alpha_scale"
+      "n_genes", "seed", "bias_profile", "bias_profile_id", "dmn_alpha_scale",
+      "read_lengths", "intercept_mean"
     ),
-    value = c(n_genes, seed, bias_profile, bias_profile_id, dmn_alpha_scale)
+    value = c(n_genes, seed, bias_profile, bias_profile_id, dmn_alpha_scale,
+              paste(range(read_lengths), collapse = ":"), intercept_mean)
   ),
   file.path(out_base, "simulation_settings.tsv"),
   sep = "\t"
@@ -117,7 +147,7 @@ gene_counts <- simCountTables(
   replicates = n_reps,
   # Higher depth for RUST: 4 was too sparse after transcript QC.
   # Keeping the variance/effect settings unchanged isolates read-depth effects.
-  interceptMean = 6,
+  interceptMean = intercept_mean,
   interceptSD = 1.5,
   betaSD = 0.2,
   plot_PCA = FALSE,
@@ -161,7 +191,7 @@ exp <- simNGScoverage(
   out_dir = file.path(out_base, "reads"),
   exp_name = "human_flavoured_riboseq",
   exp_save_dir = file.path(out_base, "experiment"),
-  read_lengths_per = list(RFP = 28:30),
+  read_lengths_per = list(RFP = read_lengths),
   seq_bias = load_seq_bias(
     type = "codon",
     shift = "a-site",

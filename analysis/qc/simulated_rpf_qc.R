@@ -111,16 +111,56 @@ summarize_simulated_rpf_qc <- function(truth, dataset_dir) {
                      by = .(sample, spliced = grepl("N", cigar, fixed = TRUE))],
     frame = truth[region == "cds", .(reads = sum(score)),
                   by = .(sample, frame = (region_position - 1L) %% 3L)],
+    # The same periodicity split per fragment length. Pooled over all lengths a
+    # weak frame signal in one length class is hidden by the strong ones, and
+    # the per-length pattern is what decides which lengths an analysis can use:
+    # a length whose reads spread evenly over the three frames carries no
+    # positional information, however abundant it is.
+    frame_length = truth[region == "cds", .(reads = sum(score)),
+                         by = .(sample, fragment_length,
+                                frame = (region_position - 1L) %% 3L)],
+    # The same split, but read the way an analysis tool reads it when it applies
+    # one offset to every fragment length. A tool starts from a fragment's 5' end
+    # and adds an offset to reach the decoding site; the correct offset grows with
+    # length, so one value is right for some lengths and wrong by a nucleotide for
+    # others -- and being wrong by one nucleotide moves the frame. The assumed
+    # offset is the commonest one in the sample, which is what an offset inferred
+    # from the pooled start-codon peak would come out as.
+    frame_common_offset = {
+      assumed <- truth[region == "cds", .(assumed_offset = as.integer(
+        names(sort(table(site_offset), decreasing = TRUE))[1L])), by = sample]
+      cds <- merge(truth[region == "cds"], assumed, by = "sample")
+      cds[, .(reads = sum(score)), by = .(
+        sample, assumed_offset, fragment_length,
+        frame = ((region_position - 1L) + assumed_offset - site_offset) %% 3L)]
+    },
+    # The window reaches back into the leader on purpose. Ribosomes scan the
+    # leader rather than translate it, so coverage there should be clearly
+    # weaker than in the coding sequence, and seeing where it drops off is part
+    # of judging whether the start of translation looks right. Positions are
+    # counted from the first nucleotide of the start codon, so the leader
+    # contributes negative offsets.
     start_profile = truth[
-      region == "cds" & region_position >= 1L & region_position <= 121L,
+      (region == "cds" & region_position >= 1L & region_position <= 121L) |
+        (region == "leader" & region_position > leader_length - 60L),
       .(reads = sum(score)),
-      by = .(sample, relative_position = region_position - 1L)
+      by = .(sample, relative_position = data.table::fifelse(
+        region == "cds", region_position - 1L,
+        region_position - leader_length - 1L))
     ],
+    # The window reaches past the stop codon on purpose. Whether the signal
+    # drops away behind it is the interesting part: ribosomes should release
+    # there, so coverage continuing into the trailer means read-through or
+    # background. Cutting the window at the stop codon hides exactly that.
+    # Positions are counted from the stop codon, so the trailer contributes
+    # positive offsets and the CDS negative ones.
     stop_profile = truth[
-      region == "cds" & region_position - cds_length >= -120L &
-        region_position - cds_length <= 0L,
+      (region == "cds" & region_position - cds_length >= -120L) |
+        (region == "trailer" & region_position <= 60L),
       .(reads = sum(score)),
-      by = .(sample, relative_position = region_position - cds_length)
+      by = .(sample, relative_position = data.table::fifelse(
+        region == "cds", region_position - cds_length, region_position
+      ))
     ],
     metagene = truth[, .(reads = sum(score)), by = .(
       sample,

@@ -17,8 +17,19 @@ test_that("the dataset simulation workflow uses a RUST-compatible read depth", {
   expect_false(any(grepl('bias = "all"', script, fixed = TRUE)))
   expect_true(any(grepl("simulation_settings.tsv", script, fixed = TRUE)))
   expect_true(any(grepl('unset = "3000"', script, fixed = TRUE)))
-  expect_true(any(grepl("interceptMean = 6", script, fixed = TRUE)))
-  expect_false(any(grepl("interceptMean = 4", script, fixed = TRUE)))
+  # Read depth and fragment lengths are settable per run, but their defaults are
+  # part of what this workflow promises, so both the mechanism and the default
+  # are pinned here. A depth of 4 was too sparse once and must not come back.
+  expect_true(any(grepl("COVSIM_BIGDATA_INTERCEPT_MEAN", script, fixed = TRUE)))
+  expect_true(any(grepl("interceptMean = intercept_mean", script, fixed = TRUE)))
+  expect_true(any(grepl('unset = "6"', script, fixed = TRUE)))
+  expect_false(any(grepl('unset = "4"', script, fixed = TRUE)))
+  expect_true(any(grepl("COVSIM_BIGDATA_READ_LENGTHS", script, fixed = TRUE)))
+  expect_true(any(grepl("read_lengths_per = list(RFP = read_lengths)", script, fixed = TRUE)))
+  expect_true(any(grepl('unset = "26:33"', script, fixed = TRUE)))
+  # Both settings have to reach the run's own record, or a stored run cannot be
+  # told apart from one made with different values.
+  expect_true(any(grepl('"read_lengths", "intercept_mean"', script, fixed = TRUE)))
   expect_true(any(grepl("interceptSD = 1.5", script, fixed = TRUE)))
   expect_true(any(grepl("betaSD = 0.2", script, fixed = TRUE)))
   expect_true(any(grepl("trailer_length <- rep(120, n_genes)", script, fixed = TRUE)))
