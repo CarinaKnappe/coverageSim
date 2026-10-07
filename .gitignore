@@ -14,18 +14,21 @@ BSgenome.Human.test.genc2522M/
 test_human.2bit
 test_human.2bit_Human.test_seed
 
-# Generated simulation/demo outputs (keep workflow scripts in this directory).
+# Generated simulation and demo outputs. Runs write to coverageSim_data/runs/
+# beside the repository; these patterns only catch output a script still drops
+# next to itself.
 tests/tests_and_demos/*/experiment/
 tests/tests_and_demos/*/genome/
 tests/tests_and_demos/*/reads/
-tests/tests_and_demos/*/read_end_nt_summary/
-tests/tests_and_demos/*_G_end_dropout_summary.csv
+analysis/workflows/*/experiment/
+analysis/workflows/*/genome/
+analysis/workflows/*/reads/
+analysis/workflows/*_G_end_dropout_summary.csv
+analysis/workflows/*/read_end_nt_summary/
 
 # Large external human input/output dataset; store outside the repository.
-tests/tests_and_demos/real_human_riboseq/
 
 # Personal experiment logbook; stays out of the repository by request.
-/tests/tests_and_demos/Parameter_settings_per_run.ods
 
 # Local agent notes (personal, go stale) and test logs.
 /.agents/

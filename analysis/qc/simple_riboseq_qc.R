@@ -12,9 +12,13 @@ load_simulated_rpf_qc_helpers <- function() {
       Sys.setenv(COVSIM_QC_AUTORUN = old)
   })
   Sys.setenv(COVSIM_QC_AUTORUN = "false")
+  # Both files live in analysis/qc/. Which relative path reaches the helper
+  # depends on where R was started: the repository root, this script's own
+  # directory, or tests/testthat when the test suite sources it.
   candidates <- c(
-    file.path("tests", "tests_and_demos", "simulated_rpf_qc.R"),
-    file.path("..", "tests_and_demos", "simulated_rpf_qc.R")
+    file.path("analysis", "qc", "simulated_rpf_qc.R"),
+    "simulated_rpf_qc.R",
+    file.path("..", "..", "analysis", "qc", "simulated_rpf_qc.R")
   )
   helper <- candidates[file.exists(candidates)][1L]
   if (is.na(helper)) stop("Cannot locate simulated_rpf_qc.R")

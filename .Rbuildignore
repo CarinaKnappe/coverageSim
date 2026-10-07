@@ -4,6 +4,7 @@
 ^AGENTS\.md$
 ^CLAUDE\.md$
 ^analysis$
+^tests/tests_and_demos$
 ^git_ignore$
 ^\.agents$
 ^CoverageSim_manuscript.*\.pdf$

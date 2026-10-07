@@ -1,4 +1,4 @@
-source(testthat::test_path("..", "tests_and_demos", "real_input_validation.R"))
+source(testthat::test_path("..", "..", "analysis", "R", "real_input_validation.R"))
 
 test_that("held-out scoring rewards known end preferences independently of depth", {
   data <- data.table::data.table(transcript_id = rep(c("train", "test"), each = 2),

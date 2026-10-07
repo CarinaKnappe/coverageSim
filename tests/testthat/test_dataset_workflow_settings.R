@@ -1,5 +1,5 @@
-test_that("bigData workflow uses higher RUST-compatible read depth", {
-  script_path <- testthat::test_path("..", "tests_and_demos", "bigData.R")
+test_that("the dataset simulation workflow uses a RUST-compatible read depth", {
+  script_path <- testthat::test_path("..", "..", "analysis", "workflows", "simulate_dataset.R")
 
   expect_error(parse(script_path), NA)
 

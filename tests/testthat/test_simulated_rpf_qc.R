@@ -5,7 +5,7 @@ test_that("simulated-RPF QC maps plus and minus transcript coordinates", {
       Sys.setenv(COVSIM_QC_AUTORUN = old)
   })
   Sys.setenv(COVSIM_QC_AUTORUN = "false")
-  script <- testthat::test_path("..", "tests_and_demos", "simulated_rpf_qc.R")
+  script <- testthat::test_path("..", "..", "analysis", "qc", "simulated_rpf_qc.R")
   env <- new.env(parent = globalenv())
   sys.source(script, envir = env)
 
@@ -31,7 +31,7 @@ test_that("simulated-RPF QC calculates frame and splicing summaries", {
       Sys.setenv(COVSIM_QC_AUTORUN = old)
   })
   Sys.setenv(COVSIM_QC_AUTORUN = "false")
-  script <- testthat::test_path("..", "tests_and_demos", "simulated_rpf_qc.R")
+  script <- testthat::test_path("..", "..", "analysis", "qc", "simulated_rpf_qc.R")
   env <- new.env(parent = globalenv())
   sys.source(script, envir = env)
 

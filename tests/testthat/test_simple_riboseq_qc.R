@@ -5,7 +5,7 @@ test_that("simple Ribo-seq QC converts fragments to per-base coverage", {
       Sys.setenv(COVSIM_SIMPLE_QC_AUTORUN = old)
   })
   Sys.setenv(COVSIM_SIMPLE_QC_AUTORUN = "false")
-  script <- testthat::test_path("..", "tests_and_demos", "simple_riboseq_qc.R")
+  script <- testthat::test_path("..", "..", "analysis", "qc", "simple_riboseq_qc.R")
   env <- new.env(parent = globalenv())
   sys.source(script, envir = env)
   env$load_simulated_rpf_qc_helpers()
@@ -29,7 +29,7 @@ test_that("simple Ribo-seq QC chooses covered examples on each strand", {
       Sys.setenv(COVSIM_SIMPLE_QC_AUTORUN = old)
   })
   Sys.setenv(COVSIM_SIMPLE_QC_AUTORUN = "false")
-  script <- testthat::test_path("..", "tests_and_demos", "simple_riboseq_qc.R")
+  script <- testthat::test_path("..", "..", "analysis", "qc", "simple_riboseq_qc.R")
   env <- new.env(parent = globalenv())
   sys.source(script, envir = env)
 
