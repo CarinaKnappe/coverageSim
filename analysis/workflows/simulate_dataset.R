@@ -1,4 +1,4 @@
-# Create (big) simulated data sets
+# Create a simulated Ribo-seq data set
 
 # STEPS:
 # Step 1: what the genes look like
@@ -13,18 +13,18 @@ devtools::load_all(".")
 library(ORFik)
 library(SummarizedExperiment)
 
-n_genes <- as.integer(Sys.getenv("COVSIM_BIGDATA_N_GENES", unset = "3000"))
+n_genes <- as.integer(Sys.getenv("COVSIM_DATASET_N_GENES", unset = "3000"))
 if (is.na(n_genes) || n_genes < 1L) {
-  stop("COVSIM_BIGDATA_N_GENES must be a positive integer")
+  stop("COVSIM_DATASET_N_GENES must be a positive integer")
 }
 
 bias_profile <- Sys.getenv(
-  "COVSIM_BIGDATA_BIAS_PROFILE", unset = "median"
+  "COVSIM_DATASET_BIAS_PROFILE", unset = "median"
 )
 allowed_bias_profiles <- c("median", "start_codon", "stop_codon", "similar")
 if (!bias_profile %in% allowed_bias_profiles) {
   stop(
-    "COVSIM_BIGDATA_BIAS_PROFILE must select one profile: ",
+    "COVSIM_DATASET_BIAS_PROFILE must select one profile: ",
     paste(allowed_bias_profiles, collapse = ", ")
   )
 }
@@ -33,21 +33,61 @@ bias_profile_id <- c(
 )[[bias_profile]]
 
 dmn_alpha_scale <- as.numeric(Sys.getenv(
-  "COVSIM_BIGDATA_DMN_ALPHA_SCALE", unset = "1"
+  "COVSIM_DATASET_DMN_ALPHA_SCALE", unset = "1"
 ))
 if (length(dmn_alpha_scale) != 1L || !is.finite(dmn_alpha_scale) ||
     dmn_alpha_scale <= 0) {
-  stop("COVSIM_BIGDATA_DMN_ALPHA_SCALE must be one finite number greater than zero")
+  stop("COVSIM_DATASET_DMN_ALPHA_SCALE must be one finite number greater than zero")
 }
 
+# Library preparation favours some bases at a fragment's ends, so the observed
+# ends are not a faithful record of where the enzyme cut. By default no such
+# bias is simulated. COVSIM_DATASET_END_BIAS_FIT names a fit saved by
+# learn_end_bias() from a real library; its 5' and 3' tables are then applied
+# as measured. COVSIM_DATASET_END_BIAS_STRENGTH raises every weight of both
+# tables to that power: 1 keeps the measured bias, 3 makes it three times as
+# strong on the log scale, for asking whether an analysis tool can see it.
+end_bias_settings <- function(fit_path, strength_text) {
+  strength <- suppressWarnings(as.numeric(strength_text))
+  if (length(strength) != 1L || !is.finite(strength) || strength < 0) {
+    stop("COVSIM_DATASET_END_BIAS_STRENGTH must be one finite number of zero or more")
+  }
+  if (!nzchar(fit_path)) {
+    return(list(five_prime_bias = list(source = "none"),
+                three_prime_bias = list(source = "none"),
+                strength = strength))
+  }
+  if (!file.exists(fit_path)) {
+    stop("COVSIM_DATASET_END_BIAS_FIT does not exist: ", fit_path)
+  }
+  fit <- readRDS(fit_path)
+  if (!inherits(fit, "covsim_end_bias_fit")) {
+    stop("COVSIM_DATASET_END_BIAS_FIT must be a fit saved from learn_end_bias()")
+  }
+  scaled <- function(bias) {
+    list(source = bias$source, table = bias$table, strength = strength)
+  }
+  list(five_prime_bias = scaled(fit$five_prime_bias),
+       three_prime_bias = scaled(fit$three_prime_bias),
+       strength = strength)
+}
+end_bias_fit_path <- Sys.getenv("COVSIM_DATASET_END_BIAS_FIT", unset = "")
+end_bias <- end_bias_settings(
+  end_bias_fit_path,
+  Sys.getenv("COVSIM_DATASET_END_BIAS_STRENGTH", unset = "1")
+)
+end_bias_strength <- end_bias$strength
+five_prime_bias <- end_bias$five_prime_bias
+three_prime_bias <- end_bias$three_prime_bias
+
 run_tag <- Sys.getenv(
-  "COVSIM_BIGDATA_RUN_TAG",
+  "COVSIM_DATASET_RUN_TAG",
   unset = paste0(
     n_genes, "_genes_simulated_rpf_asite_", bias_profile
   )
 )
 out_root <- Sys.getenv(
-  "COVSIM_BIGDATA_OUT_ROOT",
+  "COVSIM_DATASET_OUT_ROOT",
   unset = file.path(
     Sys.getenv("COVSIM_DATA_ROOT", unset = file.path(dirname(getwd()), "coverageSim_data")),
     "runs"
@@ -65,7 +105,7 @@ dir.create(file.path(out_base, "experiment"), recursive = TRUE, showWarnings = F
 # the working directory, unsaved edits count too, which is what this records.
 write_code_version(out_base)
 
-seed <- as.integer(Sys.getenv("COVSIM_BIGDATA_SEED", unset = "42"))
+seed <- as.integer(Sys.getenv("COVSIM_DATASET_SEED", unset = "42"))
 
 # Fragment lengths and read depth are the two settings most often varied between
 # runs, so they are read from the environment rather than edited in place.
@@ -77,11 +117,11 @@ seed <- as.integer(Sys.getenv("COVSIM_BIGDATA_SEED", unset = "42"))
 # fragment's 5' end to the decoding site grows with length -- 14 nt up to 27 nt,
 # 15 nt for 28 to 30, 16 nt above that. A run restricted to 28:30 therefore has
 # one offset for every fragment and cannot show that relationship at all.
-read_length_range <- Sys.getenv("COVSIM_BIGDATA_READ_LENGTHS", unset = "26:33")
+read_length_range <- Sys.getenv("COVSIM_DATASET_READ_LENGTHS", unset = "26:33")
 read_lengths <- eval(parse(text = read_length_range))
 if (!is.numeric(read_lengths) || !length(read_lengths) ||
     any(!is.finite(read_lengths)) || any(read_lengths < 1)) {
-  stop("COVSIM_BIGDATA_READ_LENGTHS must evaluate to positive numbers, e.g. 26:33")
+  stop("COVSIM_DATASET_READ_LENGTHS must evaluate to positive numbers, e.g. 26:33")
 }
 read_lengths <- as.integer(read_lengths)
 
@@ -89,10 +129,10 @@ read_lengths <- as.integer(read_lengths)
 # 6 leaves roughly 125 reads per transcript at 300 genes, which is enough to see
 # periodicity but too thin for choros, which trains on the 250 densest
 # transcripts. 10 gives roughly 970.
-intercept_mean <- as.numeric(Sys.getenv("COVSIM_BIGDATA_INTERCEPT_MEAN",
+intercept_mean <- as.numeric(Sys.getenv("COVSIM_DATASET_INTERCEPT_MEAN",
                                         unset = "6"))
 if (!is.finite(intercept_mean)) {
-  stop("COVSIM_BIGDATA_INTERCEPT_MEAN must be one finite number")
+  stop("COVSIM_DATASET_INTERCEPT_MEAN must be one finite number")
 }
 set.seed(seed)
 
@@ -100,10 +140,12 @@ data.table::fwrite(
   data.table::data.table(
     setting = c(
       "n_genes", "seed", "bias_profile", "bias_profile_id", "dmn_alpha_scale",
-      "read_lengths", "intercept_mean"
+      "read_lengths", "intercept_mean", "end_bias_fit", "end_bias_strength"
     ),
     value = c(n_genes, seed, bias_profile, bias_profile_id, dmn_alpha_scale,
-              paste(range(read_lengths), collapse = ":"), intercept_mean)
+              paste(range(read_lengths), collapse = ":"), intercept_mean,
+              if (nzchar(end_bias_fit_path)) end_bias_fit_path else "none",
+              end_bias_strength)
   ),
   file.path(out_base, "simulation_settings.tsv"),
   sep = "\t"
@@ -206,8 +248,8 @@ exp <- simNGScoverage(
     source = "default",
     site_reference = "a_site",
     boundary_action = "renormalize",
-    five_prime_bias = list(source = "none"),
-    three_prime_bias = list(source = "none")
+    five_prime_bias = five_prime_bias,
+    three_prime_bias = three_prime_bias
   ),
   ground_truth = TRUE,
   libFormats = list(RFP = "bam"),
