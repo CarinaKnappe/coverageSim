@@ -611,6 +611,10 @@ add_sequence_bias <- function(simGenome, dt_range, tAI, region_ranges, lengths, 
   # One weight per codon, but dt_range has one row per nucleotide, so every third
   # row names the gene that codon belongs to.
   seq_alpha <- split(seq_alpha, dt_range$genes[c(T, F, F)])
+  # Tell sim_sequence_bias() whether the first weight of each gene is the start
+  # codon's own position weight or just the weight of the codon ATG. Only the
+  # former is restored after the smoothing (see there).
+  attr(seq_alpha, "start_codon_marked") <- special_symbols[1]
   # seq_lengths <- lengths / 3
   # if (any(seq_lengths != as.integer(lengths/3))) stop("Mismatch of seqlength and divisor")
   # seq_length_max <- max(seq_lengths)
@@ -674,6 +678,28 @@ apply_autocorrelation_kernel <- function(signal, kernel) {
 sim_sequence_bias <- function(ideal_coverage, lengths, alpha_matrix,
                               seq_acf = 9, rnase_acf =
                                 c(0.5, 2, 1, 10, 2, 1, 0.5)) {
+  # The start codon's weight says how often a decoding site sits on the start
+  # codon itself. For an A-site table that is almost never, because initiation
+  # places the start codon in the P site, not the A site. The chain below cannot
+  # keep such a single-codon dip: the sharpening and the 19-codon smoothing fill
+  # it from its neighbours, above all from the initiation peak on the very next
+  # codon. Measured in a 300-gene run, the start codon came out at about twice
+  # the ordinary level, against 0.03 times in a real human library. So its ratio to
+  # an ordinary codon is recorded here and imposed again at the very end. The end
+  # and not just after the smoothing, because the table value was measured from
+  # real reads and therefore already contains the real RNase blur; letting the
+  # RNase step blur it a second time would leak the initiation peak back in.
+  # Only the start codon is treated this way. The initiation peak and the codons
+  # after it come out close to real data through the chain as it is.
+  start_ratio <- NULL
+  if (!is.null(alpha_matrix) &&
+      isTRUE(attr(alpha_matrix, "start_codon_marked"))) {
+    start_ratio <- vapply(alpha_matrix, function(a) {
+      n <- length(a)
+      if (n < 5L) return(NA_real_)
+      a[1L] / stats::median(a[-c(1L, 2L, n - 1L, n)])
+    }, numeric(1))
+  }
   if (!is.null(alpha_matrix)){
     # res <- as.data.table(t(alpha_matrix))
     res <- alpha_matrix
@@ -757,6 +783,17 @@ sim_sequence_bias <- function(ideal_coverage, lengths, alpha_matrix,
   res <- lapply(seq_along(res), function(i) {
     codon_ac_rnase_alphas <- res[[i]]
     codon_ac_rnase_alphas <- codon_ac_rnase_alphas[!is.na(codon_ac_rnase_alphas)]
+    if (!is.null(start_ratio) && is.finite(start_ratio[i])) {
+      # The vector is the gene's nucleotides plus the RNase margin on both
+      # sides, so the start codon's first nucleotide sits just past the margin.
+      # Ordinary codons are compared on their first nucleotide, where step 2
+      # put their weight.
+      n_codons <- length(alpha_matrix[[i]])
+      margin <- (length(codon_ac_rnase_alphas) - 3L * n_codons) %/% 2L
+      ordinary <- margin + 1L + 3L * seq.int(2L, n_codons - 3L)
+      codon_ac_rnase_alphas[margin + 1L] <- start_ratio[i] *
+        stats::median(codon_ac_rnase_alphas[ordinary])
+    }
     codon_ac_rnase_alphas <- codon_ac_rnase_alphas * (alpha_means[i] / mean(codon_ac_rnase_alphas))
     codon_ac_rnase_alphas[codon_ac_rnase_alphas == 0] <- 1e-24
     return(codon_ac_rnase_alphas)

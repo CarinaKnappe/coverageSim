@@ -120,3 +120,78 @@ test_that("a wrapper redeclaring its own seq_bias = 'AUTO' default still auto-se
   })
   expect_equal(captured, list("a-site", "p-site"))
 })
+
+# Run one gene's codon weights through sim_sequence_bias() the way
+# simNGScoverage() does (shapes(9) smoothing, default RNase kernel) and read back
+# the weight on each codon's first nucleotide, relative to an ordinary codon.
+start_region_ratios <- function(alpha, start_codon_marked) {
+  n <- length(alpha)
+  alpha_matrix <- list(alpha)
+  attr(alpha_matrix, "start_codon_marked") <- start_codon_marked
+  set.seed(1)
+  out <- coverageSim:::sim_sequence_bias(
+    NULL, lengths = n * 3L, alpha_matrix = alpha_matrix, seq_acf = shapes(9)
+  )[[1L]]
+  margin <- (length(out) - 3L * n) / 2L
+  per_codon <- out[margin + 1L + seq(0L, by = 3L, length.out = n)]
+  per_codon / stats::median(per_codon[-c(1L, 2L, n - 1L, n)])
+}
+
+test_that("the start codon keeps its own weight through the smoothing", {
+  # In an A-site table the start codon is rare, because initiation places it
+  # in the P site, while the next codon carries the initiation peak. Without
+  # this, the smoothing filled the start codon from that peak and it came out
+  # well above an ordinary codon.
+  ordinary <- 0.609
+  alpha <- rep(ordinary, 60)
+  alpha[1] <- 0.12 * ordinary
+  alpha[2] <- 2.24 * ordinary
+  restored <- start_region_ratios(alpha, start_codon_marked = TRUE)
+  expect_equal(restored[1], 0.12, tolerance = 1e-8)
+  # Nothing else moves: the initiation peak and every later codon are exactly
+  # what the chain produces without the restoration.
+  untouched <- start_region_ratios(alpha, start_codon_marked = FALSE)
+  expect_gt(untouched[1], 0.5)
+  expect_equal(restored[-1], untouched[-1])
+})
+
+test_that("a table without a start-codon weight leaves the first codon to the chain", {
+  # Without a ### row the first weight is simply the weight of the codon ATG,
+  # which says nothing about the position, so it must not be imposed.
+  ordinary <- 0.609
+  alpha <- rep(ordinary, 60)
+  alpha[1] <- 0.12 * ordinary
+  expect_equal(
+    start_region_ratios(alpha, start_codon_marked = FALSE),
+    start_region_ratios(alpha, start_codon_marked = NULL)
+  )
+  # Smoothed from its neighbours it ends up well above the 0.12 that would have
+  # been imposed.
+  expect_gt(start_region_ratios(alpha, start_codon_marked = FALSE)[1], 0.25)
+})
+
+test_that("simNGScoverage() tells the chain whether the table marks the start codon", {
+  # The two tests above set the marker by hand. This one runs a small
+  # simulation and reads what actually reaches sim_sequence_bias(), so a lost
+  # marker in add_sequence_bias() fails here.
+  capture_marker <- function(seq_bias) {
+    assign(".captured_start_marker", list(), envir = .GlobalEnv)
+    on.exit(rm(".captured_start_marker", envir = .GlobalEnv), add = TRUE)
+    trace("sim_sequence_bias", where = asNamespace("coverageSim"), tracer = quote(
+      assign(".captured_start_marker",
+             c(get(".captured_start_marker", envir = .GlobalEnv),
+               list(attr(alpha_matrix, "start_codon_marked"))),
+             envir = .GlobalEnv)
+    ), print = FALSE)
+    on.exit(untrace("sim_sequence_bias", where = asNamespace("coverageSim")),
+            add = TRUE)
+    run_seq_bias_matching_experiment(seq_bias_matching_fixture(),
+                                     seq_bias = seq_bias)
+    get(".captured_start_marker", envir = .GlobalEnv)
+  }
+  with_marks <- load_seq_bias(type = "codon", shift = "a-site")
+  without_marks <- with_marks[!seqs %in% c("###", "%%%", "&&&")]
+  expect_true(all(vapply(capture_marker(with_marks), isTRUE, logical(1))))
+  expect_false(any(vapply(capture_marker(without_marks), isTRUE, logical(1))))
+  expect_gt(length(capture_marker(with_marks)), 0)
+})
