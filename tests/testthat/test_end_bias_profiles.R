@@ -232,3 +232,41 @@ test_that("length-specific feature tables reject invalid rows", {
     )
   ))), "frames")
 })
+
+test_that("end_bias_weight() looks up many fragments at once with the same rules", {
+  # One call handles every candidate fragment of a read. The rules are those of
+  # a single lookup: a weight for the fragment's own length wins over one for
+  # all lengths, an unlisted k-mer is neutral, and strength is an exponent.
+  five <- normalize_end_bias(list(
+    source = "user", strength = 2,
+    table = data.table::data.table(
+      kmer = c("AC", "AC", "GT"), weight = c(3, 2, 5),
+      fragment_length = c(28L, NA, NA)
+    )
+  ), "five_prime_bias")
+  three <- normalize_end_bias(list(
+    source = "user",
+    table = data.table::data.table(kmer = "GG", weight = 4)
+  ), "three_prime_bias")
+  sequence <- c("ACTTTTGG", "ACTTTTGG", "GTTTTTAA", "TTTTTTGG")
+  fragment_length <- c(28L, 29L, 28L, 28L)
+
+  expect_equal(
+    end_bias_weight(sequence, fragment_length, five, three),
+    c(3^2 * 4,   # length-specific 5' weight wins at length 28
+      2^2 * 4,   # no entry for length 29, so the all-length weight applies
+      5^2 * 1,   # 3' k-mer AA is not listed, so it is neutral
+      1 * 4)     # 5' k-mer TT is not listed either
+  )
+  # A single fragment gives the same answer as it does inside the vector.
+  expect_equal(end_bias_weight(sequence[2], 29L, five, three), 2^2 * 4)
+  # Lower-case sequence is looked up like upper case.
+  expect_equal(end_bias_weight(tolower(sequence), fragment_length, five, three),
+               end_bias_weight(sequence, fragment_length, five, three))
+  # Without tables, or at strength 0, every fragment is neutral.
+  none <- normalize_end_bias(list(source = "none"), "five_prime_bias")
+  expect_equal(end_bias_weight(sequence, fragment_length, none, none), rep(1, 4))
+  off <- five
+  off$strength <- 0
+  expect_equal(end_bias_weight(sequence, fragment_length, off, none), rep(1, 4))
+})

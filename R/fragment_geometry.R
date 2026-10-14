@@ -171,15 +171,35 @@ normalize_end_bias <- function(bias, bias_name) {
 # is treated as neutral rather than as impossible. `strength` scales the whole
 # effect as an exponent, so 0 disables the bias and 2 doubles its reach on the
 # log scale.
+#
+# Takes any number of fragments at once and returns one weight each. The lookup
+# is a plain vector match rather than a data.table filter per fragment, because
+# it runs for every candidate fragment of every read: filtering the table once
+# per fragment cost about 4.5 ms, which made a 300-gene sample with an end bias
+# take more than twice as long as one without.
 end_bias_weight <- function(sequence, fragment_length,
                             five_bias, three_bias) {
-  lookup <- function(kmer, length_value, bias) {
-    if (is.null(bias$table) || identical(bias$strength, 0)) return(1)
+  lookup <- function(kmer, bias) {
+    if (is.null(bias$table) || identical(bias$strength, 0)) {
+      return(rep(1, length(sequence)))
+    }
     value <- toupper(kmer)
-    exact <- bias$table[kmer == value & fragment_length == length_value, weight]
-    if (length(exact)) return(exact[[1L]] ^ bias$strength)
-    hit <- bias$table[kmer == value & is.na(fragment_length), weight]
-    if (!length(hit)) 1 else hit[[1L]] ^ bias$strength
+    table_kmer <- bias$table$kmer
+    table_length <- bias$table$fragment_length
+    table_weight <- bias$table$weight
+    # A weight given for this fragment length wins over one given for all
+    # lengths; a k-mer the table does not mention stays neutral.
+    by_length <- !is.na(table_length)
+    weight <- table_weight[by_length][match(
+      paste(value, fragment_length),
+      paste(table_kmer[by_length], table_length[by_length])
+    )]
+    general <- is.na(weight)
+    weight[general] <- table_weight[!by_length][
+      match(value[general], table_kmer[!by_length])
+    ]
+    weight[is.na(weight)] <- 1
+    weight ^ bias$strength
   }
   extract_kmer <- function(bias, from_end = FALSE) {
     if (is.null(bias$table)) return(NULL)
@@ -188,8 +208,8 @@ end_bias_weight <- function(sequence, fragment_length,
     if (from_end) substr(sequence, nchar(sequence) - k + 1L, nchar(sequence))
     else substr(sequence, 1L, k)
   }
-  lookup(extract_kmer(five_bias), fragment_length, five_bias) *
-    lookup(extract_kmer(three_bias, TRUE), fragment_length, three_bias)
+  lookup(extract_kmer(five_bias), five_bias) *
+    lookup(extract_kmer(three_bias, TRUE), three_bias)
 }
 
 end_bias_kmer <- function(sequence, bias, from_end = FALSE) {
@@ -628,12 +648,10 @@ make_simulated_rpf_fragments <- function(signal_table, transcript_models,
       as.integer((row$region_position - 1L) %% 3L)
     } else 0L
     valid[, frame := frame]
-    valid[, end_bias_weight := vapply(seq_len(.N), function(j) {
-      end_bias_weight(
-        sequence[j],
-        fragment_length[j], geometry$five_prime_bias, geometry$three_prime_bias
-      )
-    }, numeric(1))]
+    valid[, end_bias_weight := end_bias_weight(
+      sequence, fragment_length,
+      geometry$five_prime_bias, geometry$three_prime_bias
+    )]
     valid[, codon_bias_weight := vapply(seq_len(.N), function(j) {
       fragment_feature_weight(codon[j], fragment_length[j],
                               geometry$codon_bias, "codon")
