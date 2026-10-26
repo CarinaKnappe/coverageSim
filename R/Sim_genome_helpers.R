@@ -6,27 +6,105 @@ resolve_simulated_seqnames <- function(n, seqnames, chromosome_layout,
   if (identical(chromosome_layout, "legacy_one_gene_per_contig")) {
     return(paste0("chr", seq_len(n)))
   }
-  if (length(chromosome_count) != 1L || is.na(chromosome_count) ||
-      chromosome_count < 1L) {
-    stop("chromosome_count must be one positive integer")
-  }
+  check_whole_numbers(chromosome_count, "chromosome_count", min = 1)
   paste0("chr", seq_len(min(n, as.integer(chromosome_count))))
+}
+
+# TRUE when x is numeric and every value is a finite whole number. Region
+# lengths are counted in nucleotides, so 100.5 has no meaning, and a missing
+# value would otherwise surface much later as an unrelated error.
+is_whole_number_vector <- function(x) {
+  is.numeric(x) && all(is.finite(x)) && all(x == round(x))
+}
+
+# Stop with a message a user can act on unless x is whole numbers of at least
+# `min` (and, if given, divisible by `multiple_of`). With `per_gene = n`, x
+# needs one value per gene (or, with `allow_single`, one value for all genes);
+# without it, x is a single setting.
+check_whole_numbers <- function(x, name, min, per_gene = NULL,
+                                multiple_of = NULL, allow_single = FALSE) {
+  if (is.null(per_gene)) {
+    if (length(x) != 1L) stop(name, " must be one number", call. = FALSE)
+  } else if (!(length(x) == per_gene || (allow_single && length(x) == 1L))) {
+    stop(name, " must have one value per gene (n = ", per_gene, "), not ",
+         length(x), if (allow_single) ", or one value for all genes",
+         call. = FALSE)
+  }
+  valid <- is_whole_number_vector(x) && all(x >= min) &&
+    (is.null(multiple_of) || all(x %% multiple_of == 0))
+  if (!valid) {
+    stop(name, if (is.null(per_gene)) " must be one whole number" else
+                 " must be whole numbers",
+         " of at least ", min,
+         if (!is.null(multiple_of)) paste0(", divisible by ", multiple_of,
+                                           " (whole codons)"),
+         call. = FALSE)
+  }
+  invisible(TRUE)
 }
 
 genome_input_test_controller <- function() {
   with(rlang::caller_env(),{
-    # Sanity tests for input
+    # Sanity tests for input. Each check names the setting and the values it
+    # accepts, because a bad value otherwise surfaces much later as an
+    # unrelated internal error.
     message("-- Verifying input")
-    stopifnot(n > 0)
-    stopifnot(all(cds_intron_length%%3 == 0))
-    stopifnot(all(cds_length%%3 == 0))
-    stopifnot(length(strand) == n)
-    stopifnot(length(leader_length) == n)
-    stopifnot(length(trailer_length) == n)
-    stopifnot(length(seqnames) == length(unique(seqnames)))
-    stopifnot(length(gene_names) == length(unique(gene_names)))
-    stopifnot(length(tx_names) == length(unique(tx_names)))
-    stopifnot(length(seqnames) <= n)
+    # cds_length excludes the start and stop codon, which are added to it.
+    check_whole_numbers(cds_length, "cds_length", min = 9, per_gene = n,
+                        multiple_of = 3)
+    check_whole_numbers(cds_exons, "cds_exons", min = 1)
+    if (cds_exons >= min(cds_length)) {
+      stop("cds_exons must be smaller than every cds_length", call. = FALSE)
+    }
+    # Introns are only built when the CDS has more than one exon.
+    if (cds_exons > 1) {
+      check_whole_numbers(cds_intron_length, "cds_intron_length", min = 3,
+                          per_gene = n, multiple_of = 3, allow_single = TRUE)
+    }
+    # Every transcript needs at least one leader nucleotide: the start codon
+    # is placed right after the leader, and a transcript that begins with its
+    # start codon has no 5' UTR in which to place uORFs or measure initiation.
+    # A trailer may be empty, because the transcript can end with the stop codon.
+    check_whole_numbers(leader_length, "leader_length", min = 1, per_gene = n)
+    check_whole_numbers(trailer_length, "trailer_length", min = 0, per_gene = n)
+    check_whole_numbers(flank_length, "flank_length", min = 0, per_gene = n,
+                        allow_single = TRUE)
+    check_whole_numbers(max_uorfs, "max_uorfs", min = 0)
+    # The shortest possible uORF is a start codon directly followed by a stop.
+    check_whole_numbers(uorf_max_length, "uorf_max_length", min = 6, multiple_of = 3)
+    if (min(cds_length) < uorf_max_length + 3) {
+      stop("every cds_length must be at least uorf_max_length + 3 (here ",
+           uorf_max_length + 3, ")", call. = FALSE)
+    }
+    if (!is.logical(uorfs_can_overlap) || length(uorfs_can_overlap) != 1L ||
+        is.na(uorfs_can_overlap)) {
+      stop("uorfs_can_overlap must be TRUE or FALSE", call. = FALSE)
+    }
+    for (setting in c("export_txdb", "debug_on")) {
+      value <- get(setting)
+      if (!is.logical(value) || length(value) != 1L || is.na(value)) {
+        stop(setting, " must be TRUE or FALSE", call. = FALSE)
+      }
+    }
+    if (!(is.logical(uorfs_can_overlap_cds) || is.numeric(uorfs_can_overlap_cds)) ||
+        length(uorfs_can_overlap_cds) != 1L ||
+        !isTRUE(uorfs_can_overlap_cds %in% seq(0, 2))) {
+      stop("uorfs_can_overlap_cds must be 0 (FALSE), 1 (TRUE) or 2", call. = FALSE)
+    }
+    if (length(strand) != n) {
+      stop("strand must have one value per gene (n = ", n, ")", call. = FALSE)
+    }
+    if (!is.character(start_codons) || !length(start_codons) ||
+        any(!grepl("^[ACGT]{3}$", start_codons))) {
+      stop("start_codons must be codons of three letters from A, C, G, T",
+           call. = FALSE)
+    }
+    if (anyDuplicated(seqnames)) stop("seqnames must be unique", call. = FALSE)
+    if (length(seqnames) > n) {
+      stop("there cannot be more seqnames (chromosomes) than genes", call. = FALSE)
+    }
+    if (anyDuplicated(gene_names)) stop("gene_names must be unique", call. = FALSE)
+    if (anyDuplicated(tx_names)) stop("tx_names must be unique", call. = FALSE)
     if (!is.null(chromosome_weights)) {
       if (length(chromosome_weights) != length(seqnames) ||
           any(!is.finite(chromosome_weights)) ||
@@ -34,9 +112,6 @@ genome_input_test_controller <- function() {
         stop("chromosome_weights must contain one positive finite value per chromosome")
       }
     }
-    stopifnot(length(uorfs_can_overlap_cds) == 1)
-    stopifnot(uorfs_can_overlap_cds %in% seq(0, 2))
-    stopifnot(min(cds_length) >= 9 & min(cds_length) > cds_exons & (min(cds_length) >= uorf_max_length + 3))
     # A non-empty subset of the three real stop codons -- not just the full
     # set of all three -- so stop-codon usage bias (real organisms/genes do
     # prefer some of TAA/TAG/TGA over others) can be simulated. Restricted
@@ -45,8 +120,11 @@ genome_input_test_controller <- function() {
     # Biostrings::translate()'s default (standard) genetic code to reliably
     # recognize them as stops; a different code entirely (e.g. mitochondrial,
     # where TGA is not a stop) is not supported.
-    stopifnot(length(stop_codons) >= 1, !anyDuplicated(stop_codons),
-             all(stop_codons %in% c("TAG", "TGA", "TAA")))
+    if (!length(stop_codons) || anyDuplicated(stop_codons) ||
+        !all(stop_codons %in% c("TAG", "TGA", "TAA"))) {
+      stop("stop_codons must be one or more of TAG, TGA, TAA, without duplicates",
+           call. = FALSE)
+    }
     })
 }
 
