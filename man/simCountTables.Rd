@@ -58,7 +58,9 @@ The higher it is, the more variance counts of the genes can have. Sane values: B
 \item{print_statistics}{logical, default TRUE, print count statistics.}
 }
 \value{
-a ranged summarized experiment object
+a ranged summarized experiment object. The settings this run used
+  are kept in \code{metadata(result)$simulation_record} and end up in the
+  \code{simulation_report.tsv} written by \code{simNGScoverage()}.
 }
 \description{
 Step 2 of the simulation: decide how many reads each gene gets in each sample.

@@ -37,7 +37,9 @@
 #' @param plot_PCA logical, default TRUE. Plot PCA plot.
 #' @param print_statistics logical, default TRUE, print count statistics.
 #' @references https://genomebiology.biomedcentral.com/articles/10.1186/s13059-014-0550-8
-#' @return a ranged summarized experiment object
+#' @return a ranged summarized experiment object. The settings this run used
+#'   are kept in \code{metadata(result)$simulation_record} and end up in the
+#'   \code{simulation_report.tsv} written by \code{simNGScoverage()}.
 #' @export
 #' @examples
 #' # Sim 500 genes with: 4 library types, 2 conditions, 2 replicates each
@@ -52,12 +54,16 @@ simCountTables <- function (n = 500, libtypes = c("RFP", "RNA", "CAGE", "PAS"),
                             dispMeanRel = function(x) 4/x + 0.1, sizeFactors = rep(1, m),
                             plot_PCA = TRUE, print_statistics = TRUE)
 {
+  # Read before any setting is used, so recording cannot change the draws.
+  rng_state <- current_rng_state()
+  supplied <- names(match.call())[-1]
   message("Simulating count tables --")
   stopifnot(m > 0)
   stopifnot(!is.null(names(betaLibSD)))
   betaLibSD <- betaLibSD[libtypes]
   if (!is(n, "numeric")) {
     rowRanges <- n
+    genes_given_as <- describe_object(n)
     n <- length(n)
   } else {
     rowRanges <- GRanges("1", IRanges(start = (1:n - 1) * 100 +
@@ -152,7 +158,16 @@ simCountTables <- function (n = 500, libtypes = c("RFP", "RNA", "CAGE", "PAS"),
       print(cor(assay(DESeq2::collapseReplicates(d_mat, groupby = d_mat$condition))))
     }
   }
-  return(object)
+  # Recorded last, once every setting this run needs has been used in its own
+  # order; the ones it never needed stay unevaluated.
+  step_record <- make_step_record(
+    "simCountTables", sys.function(), environment(), supplied, rng_state,
+    not_used = c(if (!print) "plot_PCA", if (n_conditions < 2) "betaSD")
+  )
+  if (exists("genes_given_as", inherits = FALSE)) {
+    step_record$settings$n <- genes_given_as
+  }
+  return(add_step_record(object, step_record))
 }
 
 #' Info about params:\cr
@@ -184,7 +199,9 @@ simCountTables <- function (n = 500, libtypes = c("RFP", "RNA", "CAGE", "PAS"),
 #'   tools, not something that happens at ordinary concentration values.
 #'   Left at the default 1, this reproduces the original, unscaled DMN
 #'   behavior.
-#' @return a rangedSummarizedExperiment
+#' @return a rangedSummarizedExperiment. The settings this run used are added
+#'   to \code{metadata(result)$simulation_record}, after those of
+#'   \code{simCountTables()}.
 #' @export
 #' @examples
 #' # Sim 500 genes with: 4 library types, 2 conditions, 2 replicates each
@@ -204,11 +221,15 @@ simCountTablesRegions <- function(count_table = simCountTables(),
                                          uorf =    list(RFP = 0.1, RNA = 0,   CAGE = 0, PAS = 0)),
                                   sampling = c(RFP = "MN", RNA = "MN", CAGE = "MN", PAS = "MN"),
                                   region_dmn_concentration = 1) {
+  # Read before any setting is used, so recording cannot change the draws.
+  rng_state <- current_rng_state()
+  supplied <- names(match.call())[-1]
   stopifnot(is(count_table, "SummarizedExperiment"))
   message("Simulating region count tables -")
   stopifnot(all(sampling %in% c("MN", "DMN")))
   stopifnot(is.numeric(region_dmn_concentration), length(region_dmn_concentration) == 1L,
            is.finite(region_dmn_concentration), region_dmn_concentration > 0)
+  count_table_given <- describe_object(count_table)
   prop_regions <- names(region_proportion)
   all_allowed_regions <- c("leader", "cds", "trailer", "uorf")
   stopifnot(all(regionsToSample %in% all_allowed_regions))
@@ -249,8 +270,15 @@ simCountTablesRegions <- function(count_table = simCountTables(),
   })
   assays(count_table) <- c(assays(count_table), split_mat)
   assayNames(count_table) <- c("gene", regionsToSample)
+  # Recorded last, once every setting has been used in its own order. The count
+  # table now carries the region assays, so it is described as it came in.
+  step_record <- make_step_record(
+    "simCountTablesRegions", sys.function(), environment(), supplied, rng_state,
+    summarize_only = "count_table"
+  )
+  step_record$settings$count_table <- count_table_given
   message("Done")
-  return(count_table)
+  return(add_step_record(count_table, step_record))
 }
 
 # Design matrix of the count simulation: one column per library type (or an

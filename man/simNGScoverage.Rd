@@ -222,7 +222,15 @@ given simulated library, layered on top of the usual DMN sampling; see
 \code{rgdirmnom()}. Preserves the total read count per transcript region.}
 }
 \value{
-an \code{\link[ORFik]{experiment}}
+an \code{\link[ORFik]{experiment}}. Next to the libraries in
+  \code{out_dir} it also writes \code{simulation_report.tsv}: one row per
+  setting of every step that made this run (\code{simGenome()},
+  \code{simCountTables()}, \code{simCountTablesRegions()} and this function),
+  with its value, whether it was the default, and the versions of R, the
+  computing packages and the coverageSim commit (and whether there were unsaved
+  changes). \code{simulation_report.rds} holds the same plus the full values and
+  the random state each step started from. A step that was not run through
+  coverageSim (for example a genome made elsewhere) is listed as having no record.
 }
 \description{
 Simulated read coordinates from count tables given a genome.

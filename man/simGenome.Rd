@@ -135,6 +135,9 @@ If you are not interested and you believe settings are valid, just rerun until i
 \value{
 a named character vector with paths to output files.
 genome (fasta), transcriptome (gtf), transcript Database (TxDb) and uorfs (rds)
+The settings this run used, and the random state it started from, are saved
+next to the genome as \code{<genome_name>_simulation_record.rds};
+\code{simNGScoverage()} adds them to its \code{simulation_report.tsv}.
 }
 \description{
 Step 1 of 4 in the package. Create a genome of 'n' genes distributed on

@@ -87,6 +87,9 @@
 #' @import Biostrings ORFik data.table
 #' @return a named character vector with paths to output files.
 #' genome (fasta), transcriptome (gtf), transcript Database (TxDb) and uorfs (rds)
+#' The settings this run used, and the random state it started from, are saved
+#' next to the genome as \code{<genome_name>_simulation_record.rds};
+#' \code{simNGScoverage()} adds them to its \code{simulation_report.tsv}.
 #' @export
 #' @examples
 #' # 6 genes on 6 chromosomes'
@@ -117,8 +120,14 @@ simGenome <- function(n = 500,
                       uorf_max_length = 60,
                       export_txdb = TRUE,
                       debug_on = TRUE) {
+  # Read before any setting is used, so recording cannot change the draws.
+  rng_state <- current_rng_state()
+  supplied <- names(match.call())[-1]
   chromosome_layout <- match.arg(chromosome_layout)
   check_whole_numbers(n, "n", min = 1)
+  # chromosome_count only counts when the chromosomes are not named directly.
+  chromosome_count_used <- is.null(seqnames) &&
+    chromosome_layout != "legacy_one_gene_per_contig"
   seqnames <- resolve_simulated_seqnames(
     n = n,
     seqnames = seqnames,
@@ -126,6 +135,10 @@ simGenome <- function(n = 500,
     chromosome_count = chromosome_count
   )
   genome_input_test_controller()
+  # The next step turns these two into per-gene coordinates, so keep them as
+  # they were given for the record.
+  seqnames_given <- seqnames
+  flank_length_given <- flank_length
   genome_exon_flanks_controller()
 
   ## Create annotation
@@ -152,5 +165,13 @@ simGenome <- function(n = 500,
                                      exon_cds_ranges, gene_ranges,
                                      transcript_ranges, tx_names, gene_names)
   export_genome_output_controller()
+  # Recorded last, once every setting has been used in its own order.
+  step_record <- make_step_record(
+    "simGenome", sys.function(), environment(), supplied, rng_state,
+    not_used = if (!chromosome_count_used) "chromosome_count"
+  )
+  step_record$settings$seqnames <- seqnames_given
+  step_record$settings$flank_length <- flank_length_given
+  saveRDS(step_record, genome_record_path(simGenome["genome"]))
   return(simGenome)
 }

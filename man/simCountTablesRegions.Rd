@@ -49,7 +49,9 @@ Left at the default 1, this reproduces the original, unscaled DMN
 behavior.}
 }
 \value{
-a rangedSummarizedExperiment
+a rangedSummarizedExperiment. The settings this run used are added
+  to \code{metadata(result)$simulation_record}, after those of
+  \code{simCountTables()}.
 }
 \description{
 Info about params:\cr

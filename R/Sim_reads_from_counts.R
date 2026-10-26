@@ -160,7 +160,15 @@
 #' that an eligible Step-4 position is forced to a structural zero for a
 #' given simulated library, layered on top of the usual DMN sampling; see
 #' \code{rgdirmnom()}. Preserves the total read count per transcript region.
-#' @return an \code{\link[ORFik]{experiment}}
+#' @return an \code{\link[ORFik]{experiment}}. Next to the libraries in
+#'   \code{out_dir} it also writes \code{simulation_report.tsv}: one row per
+#'   setting of every step that made this run (\code{simGenome()},
+#'   \code{simCountTables()}, \code{simCountTablesRegions()} and this function),
+#'   with its value, whether it was the default, and the versions of R, the
+#'   computing packages and the coverageSim commit (and whether there were unsaved
+#'   changes). \code{simulation_report.rds} holds the same plus the full values and
+#'   the random state each step started from. A step that was not run through
+#'   coverageSim (for example a genome made elsewhere) is listed as having no record.
 #' @import ORFik data.table GenomicRanges
 #' @export
 #' @examples
@@ -237,6 +245,9 @@ simNGScoverage <- function(simGenome,
                            dmn_family = c("dirichlet", "generalized"),
                            dmn_gdm_scale = 1,
                            dmn_zero_inflation = 0) {
+  # Read before any setting is used, so recording cannot change the draws.
+  rng_state <- current_rng_state()
+  supplied <- names(match.call())[-1]
   fragment_mode <- match.arg(fragment_mode)
   technical_artifacts <- normalize_technical_artifacts(technical_artifacts)
   if (has_active_technical_artifacts(technical_artifacts)) {
@@ -396,7 +407,19 @@ simNGScoverage <- function(simGenome,
                     files = files)
   message("Saved ORFik experiment with name:")
   message(exp_name)
-  return(read.experiment(exp_name, in.dir = exp_save_dir, validate = validate))
+  experiment <- read.experiment(exp_name, in.dir = exp_save_dir, validate = validate)
+  # Recorded last, once every setting has been used in its own order, and after
+  # they were resolved (seq_bias "AUTO" -> its table, fragment_geometry with its
+  # defaults filled in), so the record shows what ran.
+  step_record <- make_step_record(
+    "simNGScoverage", sys.function(), environment(), supplied, rng_state,
+    not_used = if (!"uorf" %in% regionsToSample) {
+      c("true_uorf_ranges", "uorf_prop_within_gene")
+    },
+    summarize_only = "count_table"
+  )
+  write_simulation_report(out_dir, simGenome["genome"], count_table, step_record)
+  return(experiment)
 }
 
 nt_coverage_all_regions <- function(count_table_regions, libClass,
