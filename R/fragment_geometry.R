@@ -535,6 +535,160 @@ has_active_fragment_bias <- function(geometry) {
   }, logical(1)))
 }
 
+# Transcript positions of several genome positions on one transcript; NA where
+# a position is not inside exactly one exon. The same arithmetic as
+# genomic_site_to_transcript(), for all positions at once.
+genomic_sites_to_transcript <- function(model, genomic_positions) {
+  exon_start <- GenomicRanges::start(model$exons)
+  exon_end <- GenomicRanges::end(model$exons)
+  inside <- outer(genomic_positions, exon_start, ">=") &
+    outer(genomic_positions, exon_end, "<=")
+  exon_index <- max.col(inside, ties.method = "first")
+  within_exon <- if (model$strand == "+") {
+    genomic_positions - exon_start[exon_index]
+  } else {
+    exon_end[exon_index] - genomic_positions
+  }
+  site <- as.integer(model$cumulative_start[exon_index] + within_exon)
+  site[rowSums(inside) != 1L] <- NA_integer_
+  site
+}
+
+# Codon or frame weights for many fragments: each distinct value and length is
+# looked up once with fragment_feature_weight().
+fragment_feature_weights <- function(values, fragment_lengths, bias, feature) {
+  if (is.null(bias$table) || identical(bias$strength, 0)) {
+    return(rep(1, length(values)))
+  }
+  key <- paste(values, fragment_lengths)
+  first <- !duplicated(key)
+  weights <- vapply(which(first), function(j) {
+    fragment_feature_weight(values[j], fragment_lengths[j], bias, feature)
+  }, numeric(1))
+  weights[match(key, key[first])]
+}
+
+# Lengths and offsets for a signal position near a transcript end, where none
+# of the usual combinations fits: keep the lengths that fit the transcript and
+# move each offset to the nearest value that keeps the fragment inside it.
+clamped_fragment_candidates <- function(candidates, site_tx, transcript_length) {
+  valid <- candidates[fragment_length <= transcript_length]
+  if (!nrow(valid)) return(valid)
+  valid[, site_offset := vapply(seq_len(.N), function(j) {
+    lower <- max(0L, site_tx + fragment_length[j] - 1L - transcript_length)
+    upper <- min(fragment_length[j] - 1L, site_tx - 1L)
+    min(max(site_offset[j], lower), upper)
+  }, integer(1))]
+  valid[, .(probability = sum(probability)), by = .(fragment_length, site_offset)]
+}
+
+# Every fragment each signal position could give rise to, with its weights.
+#
+# Each position is combined with every length-and-offset pair of `candidates`,
+# and the pairs whose fragment fits inside the transcript are kept. Positions
+# near a transcript end where nothing fits are handled by `boundary_action`
+# (see make_simulated_rpf_fragments()). Rows come in signal-row order, then in
+# the order of `candidates`.
+fragment_candidates <- function(signal_table, transcript_models, candidates,
+                                geometry) {
+  n_signal <- nrow(signal_table)
+  transcript_id <- signal_table$transcript_id
+  used_ids <- unique(transcript_id)
+  used_models <- lapply(seq_along(used_ids), function(k) {
+    transcript_models[[used_ids[k]]]
+  })
+  model_index <- match(transcript_id, used_ids)
+  has_model <- !vapply(used_models, is.null, logical(1))[model_index]
+
+  site_tx <- rep(NA_integer_, n_signal)
+  rows_per_model <- split(seq_len(n_signal), model_index)
+  for (k in as.integer(names(rows_per_model))) {
+    if (is.null(used_models[[k]])) next
+    rows <- rows_per_model[[as.character(k)]]
+    site_tx[rows] <- genomic_sites_to_transcript(
+      used_models[[k]], signal_table$signal_position[rows]
+    )
+  }
+  transcript_length <- vapply(used_models, function(model) {
+    if (is.null(model)) NA_real_ else as.numeric(model$length)
+  }, numeric(1))[model_index]
+
+  # Every position against every length-and-offset pair; keep what fits.
+  n_pairs <- nrow(candidates)
+  signal_row <- rep(seq_len(n_signal), each = n_pairs)
+  candidate_index <- rep(seq_len(n_pairs), times = n_signal)
+  tx_start <- site_tx[signal_row] - candidates$site_offset[candidate_index]
+  fits <- !is.na(tx_start) & tx_start >= 1L &
+    tx_start + candidates$fragment_length[candidate_index] - 1L <=
+      transcript_length[signal_row]
+  pairs <- data.table::data.table(
+    signal_row = signal_row[fits],
+    fragment_length = candidates$fragment_length[candidate_index[fits]],
+    site_offset = candidates$site_offset[candidate_index[fits]],
+    probability = candidates$probability[candidate_index[fits]]
+  )
+
+  nothing_fits <- has_model & !is.na(site_tx) &
+    tabulate(pairs$signal_row, nbins = n_signal) == 0L
+  if (geometry$boundary_action == "renormalize" && any(nothing_fits)) {
+    clamped_rows <- which(nothing_fits)
+    clamped <- lapply(clamped_rows, function(i) {
+      clamped_fragment_candidates(candidates, site_tx[i],
+                                  used_models[[model_index[i]]]$length)
+    })
+    nothing_fits[clamped_rows] <- vapply(clamped, nrow, integer(1)) == 0L
+    # rbindlist() numbers the tables 1, 2, ...; turn that into signal rows.
+    clamped <- data.table::rbindlist(clamped, idcol = "signal_row")
+    if (nrow(clamped)) {
+      clamped[, signal_row := clamped_rows[signal_row]]
+      pairs <- rbind(pairs, clamped)[order(signal_row)]
+    }
+  }
+
+  # Stop at the first position that cannot be placed, with the same message as
+  # when positions were placed one at a time.
+  problem <- which(!has_model | is.na(site_tx) | nothing_fits)
+  if (length(problem)) {
+    i <- problem[1L]
+    if (!has_model[i]) stop("No transcript model for: ", transcript_id[i])
+    if (is.na(site_tx[i])) {
+      stop("Signal position is not exonic in transcript ", transcript_id[i])
+    }
+    stop(
+      "Cannot create a complete fragment for transcript ", transcript_id[i],
+      " at signal position ", signal_table$signal_position[i],
+      "; affected count: ", signal_table$score[i]
+    )
+  }
+
+  transcript_sequence <- vapply(used_models, function(model) model$sequence,
+                                character(1))[model_index[pairs$signal_row]]
+  pairs[, `:=`(
+    tx_start = site_tx[signal_row] - site_offset,
+    tx_end = site_tx[signal_row] - site_offset + fragment_length - 1L
+  )]
+  pairs[, sequence := substr(transcript_sequence, tx_start, tx_end)]
+  pairs[, codon := substr(transcript_sequence, site_tx[signal_row],
+                          site_tx[signal_row] + 2L)]
+  pairs[, frame := if ("region_position" %in% names(signal_table)) {
+    as.integer((signal_table$region_position[signal_row] - 1L) %% 3L)
+  } else 0L]
+  pairs[, end_bias_weight := end_bias_weight(
+    sequence, fragment_length,
+    geometry$five_prime_bias, geometry$three_prime_bias
+  )]
+  pairs[, codon_bias_weight := fragment_feature_weights(
+    codon, fragment_length, geometry$codon_bias, "codon"
+  )]
+  pairs[, frame_bias_weight := fragment_feature_weights(
+    frame, fragment_length, geometry$frame_bias, "frame"
+  )]
+  pairs[, bias_weight := end_bias_weight * codon_bias_weight * frame_bias_weight]
+  pairs[, probability := probability / sum(probability), by = signal_row]
+  pairs[, geometry_probability := probability]
+  pairs
+}
+
 # Preserve region budgets when present; direct callers supply counts per transcript.
 # Decide which of the possible fragments actually get sequenced.
 #
@@ -550,8 +704,7 @@ has_active_fragment_bias <- function(geometry) {
 # compete across the whole transcript, which is what happens in a real library;
 # drawing per position keeps each position's count fixed, which is useful when
 # the point is to reproduce a given profile exactly.
-allocate_fragment_candidates <- function(candidate_rows, signal_table, joint) {
-  candidates <- data.table::rbindlist(candidate_rows, idcol = "signal_row")
+allocate_fragment_candidates <- function(candidates, signal_table, joint) {
   if (joint) {
     groups <- if ("sampling_group" %in% names(signal_table)) {
       signal_table$sampling_group
@@ -605,68 +758,11 @@ make_simulated_rpf_fragments <- function(signal_table, transcript_models,
     stop("Simulated RPF scores must be non-negative integers")
   }
 
-  candidate_rows <- lapply(seq_len(nrow(signal_table)), function(i) {
-    row <- signal_table[i]
-    model <- transcript_models[[row$transcript_id]]
-    if (is.null(model)) stop("No transcript model for: ", row$transcript_id)
-    site_tx <- genomic_site_to_transcript(model, row$signal_position)
-    if (is.na(site_tx)) {
-      stop("Signal position is not exonic in transcript ", row$transcript_id)
-    }
-    valid <- candidates[
-      site_tx - candidates$site_offset >= 1L &
-        site_tx - candidates$site_offset + candidates$fragment_length - 1L <= model$length,
-    ]
-    if (!nrow(valid) && geometry$boundary_action == "renormalize") {
-      valid <- candidates[fragment_length <= model$length]
-      if (nrow(valid)) {
-        valid[, site_offset := vapply(seq_len(.N), function(j) {
-          lower <- max(0L, site_tx + fragment_length[j] - 1L - model$length)
-          upper <- min(fragment_length[j] - 1L, site_tx - 1L)
-          min(max(site_offset[j], lower), upper)
-        }, integer(1))]
-        valid <- valid[, .(probability = sum(probability)),
-                       by = .(fragment_length, site_offset)]
-      }
-    }
-    if (!nrow(valid)) {
-      stop(
-        "Cannot create a complete fragment for transcript ", row$transcript_id,
-        " at signal position ", row$signal_position,
-        "; affected count: ", row$score
-      )
-    }
-    valid[, `:=`(
-      tx_start = site_tx - site_offset,
-      tx_end = site_tx - site_offset + fragment_length - 1L
-    )]
-    valid[, sequence := vapply(seq_len(.N), function(j) {
-      substr(model$sequence, tx_start[j], tx_end[j])
-    }, character(1))]
-    valid[, codon := substr(model$sequence, site_tx, site_tx + 2L)]
-    frame <- if ("region_position" %in% names(row)) {
-      as.integer((row$region_position - 1L) %% 3L)
-    } else 0L
-    valid[, frame := frame]
-    valid[, end_bias_weight := end_bias_weight(
-      sequence, fragment_length,
-      geometry$five_prime_bias, geometry$three_prime_bias
-    )]
-    valid[, codon_bias_weight := vapply(seq_len(.N), function(j) {
-      fragment_feature_weight(codon[j], fragment_length[j],
-                              geometry$codon_bias, "codon")
-    }, numeric(1))]
-    valid[, frame_bias_weight := vapply(seq_len(.N), function(j) {
-      fragment_feature_weight(frame[j], fragment_length[j],
-                              geometry$frame_bias, "frame")
-    }, numeric(1))]
-    valid[, bias_weight := end_bias_weight * codon_bias_weight * frame_bias_weight]
-    valid[, probability := probability / sum(probability)]
-    valid[, geometry_probability := probability]
-    valid
-  })
+  candidate_table <- fragment_candidates(
+    signal_table, transcript_models, candidates, geometry
+  )
   allocated <- allocate_fragment_candidates(
-    candidate_rows, signal_table, has_active_fragment_bias(geometry)
+    candidate_table, signal_table, has_active_fragment_bias(geometry)
   )
   # Only the candidates that were drawn become fragments, often a small part of
   # all candidates. They stay in the order of the candidate table (signal row,
