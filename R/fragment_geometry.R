@@ -716,6 +716,9 @@ allocate_fragment_candidates <- function(candidates, signal_table, joint) {
   if (any(!is.finite(candidates$probability))) {
     stop("End-bias strength produces non-finite weights; reduce strength")
   }
+  # No signal positions at all: there is nothing to draw, and the table stays
+  # empty instead of reaching the budget check with no budget.
+  if (!nrow(candidates)) return(candidates[, score := integer(0)])
   candidates[, c("probability", "score") := {
     rows <- unique(signal_row)
     total <- if ("read_count" %in% names(signal_table)) {

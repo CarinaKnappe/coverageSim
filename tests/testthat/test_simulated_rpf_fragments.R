@@ -169,6 +169,19 @@ test_that("a library without reads gives an empty fragment table with every colu
   ), 0L)
 })
 
+test_that("a signal table without positions gives the same empty fragment table", {
+  fixture <- make_fragment_fixture()
+  geometry <- list(source = "user", site_offset = 2L, boundary_action = "error")
+  no_positions <- make_simulated_rpf_fragments(
+    make_fragment_signals()[0], fixture$models, 8L, geometry
+  )
+  no_reads <- make_simulated_rpf_fragments(
+    make_fragment_signals()[, read_count := 0L], fixture$models, 8L, geometry
+  )
+  expect_equal(nrow(no_positions), 0L)
+  expect_identical(lapply(no_positions, class), lapply(no_reads, class))
+})
+
 test_that("ground truth contains neutral simulated-RPF fields", {
   fixture <- make_fragment_fixture()
   fragments <- make_simulated_rpf_fragments(
