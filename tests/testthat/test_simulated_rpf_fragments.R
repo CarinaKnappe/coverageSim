@@ -150,6 +150,25 @@ test_that("boundary failures report affected counts instead of dropping them", {
   )
 })
 
+test_that("a library without reads gives an empty fragment table with every column", {
+  fixture <- make_fragment_fixture()
+  # Positions with signal, but a read budget of zero.
+  no_reads <- make_fragment_signals()[, read_count := 0L]
+  fragments <- make_simulated_rpf_fragments(
+    no_reads, fixture$models, 8L,
+    list(source = "user", site_offset = 2L, boundary_action = "error")
+  )
+  with_reads <- make_simulated_rpf_fragments(
+    make_fragment_signals(), fixture$models, 8L,
+    list(source = "user", site_offset = 2L, boundary_action = "error")
+  )
+  expect_equal(nrow(fragments), 0L)
+  expect_identical(names(fragments), names(with_reads))
+  expect_length(simulated_rpf_alignments(
+    fragments, GenomeInfoDb::seqinfo(fixture$transcripts)
+  ), 0L)
+})
+
 test_that("ground truth contains neutral simulated-RPF fields", {
   fixture <- make_fragment_fixture()
   fragments <- make_simulated_rpf_fragments(

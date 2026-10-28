@@ -668,66 +668,73 @@ make_simulated_rpf_fragments <- function(signal_table, transcript_models,
   allocated <- allocate_fragment_candidates(
     candidate_rows, signal_table, has_active_fragment_bias(geometry)
   )
-  rows <- lapply(seq_len(nrow(signal_table)), function(i) {
-    row <- signal_table[i]
-    model <- transcript_models[[row$transcript_id]]
-    selected <- allocated[signal_row == i & score > 0L]
-    data.table::rbindlist(lapply(seq_len(nrow(selected)), function(j) {
-      fragment_length <- selected$fragment_length[j]
-      site_offset <- selected$site_offset[j]
-      tx_start <- selected$tx_start[j]
-      alignment <- transcript_fragment_alignment(
-        model, tx_start, fragment_length
-      )
-      tx_end <- tx_start + fragment_length - 1L
-      five_prime <- if (model$strand == "+") alignment$pos else alignment$end
-      three_prime <- if (model$strand == "+") alignment$end else alignment$pos
-      data.table::data.table(
-        seqnames = as.character(GenomicRanges::seqnames(model$exons)[1]),
-        start = alignment$pos,
-        end = alignment$end,
-        strand = model$strand,
-        cigar = alignment$cigar,
-        score = selected$score[j],
-        sampling_group = selected$sampling_group[j],
-        transcript_id = row$transcript_id,
-        ribosome_site = row$signal_position,
-        signal_position = row$signal_position,
-        fragment_start = alignment$pos,
-        fragment_end = alignment$end,
-        five_prime_end = five_prime,
-        three_prime_end = three_prime,
-        fragment_length = fragment_length,
-        site_offset = site_offset,
-        site_reference = geometry$site_reference,
-        geometry_probability = selected$geometry_probability[j],
-        sequence = selected$sequence[j],
-        # `sequence` is transcript-oriented (5'->3' of the mRNA), matching the
-        # biological fragment/read direction; it is what codon/end-motif
-        # biases and the ground-truth table use. SAM/BAM SEQ must instead be
-        # reported relative to the reference (genome plus-strand), so for
-        # minus-strand fragments we store the reverse complement separately
-        # here rather than reusing `sequence` when writing alignments.
-        reference_sequence = if (model$strand == "+") {
-          selected$sequence[j]
-        } else {
-          as.character(Biostrings::reverseComplement(
-            Biostrings::DNAString(selected$sequence[j])
-          ))
-        },
-        codon = selected$codon[j],
-        frame = selected$frame[j],
-        five_prime_kmer = end_bias_kmer(selected$sequence[j], geometry$five_prime_bias),
-        three_prime_kmer = end_bias_kmer(selected$sequence[j], geometry$three_prime_bias, TRUE),
-        end_bias_weight = selected$end_bias_weight[j],
-        codon_bias_weight = selected$codon_bias_weight[j],
-        frame_bias_weight = selected$frame_bias_weight[j],
-        fragment_bias_weight = selected$bias_weight[j],
-        final_probability = selected$probability[j]
-      )
-    }))
+  # Only the candidates that were drawn become fragments, often a small part of
+  # all candidates. They stay in the order of the candidate table (signal row,
+  # then candidate order), which sets the fragment ids.
+  drawn <- allocated[score > 0L]
+  transcript_id <- signal_table$transcript_id[drawn$signal_row]
+  signal_position <- signal_table$signal_position[drawn$signal_row]
+  # Each transcript's model is looked up once, the same way as above.
+  used_ids <- unique(transcript_id)
+  used_models <- lapply(seq_along(used_ids), function(k) {
+    transcript_models[[used_ids[k]]]
   })
-  result <- data.table::rbindlist(rows)
+  model_index <- match(transcript_id, used_ids)
+  strand <- vapply(used_models, function(model) model$strand,
+                   character(1))[model_index]
+  chromosome <- vapply(used_models, function(model) {
+    as.character(GenomicRanges::seqnames(model$exons)[1])
+  }, character(1))[model_index]
+  alignments <- lapply(seq_len(nrow(drawn)), function(j) {
+    transcript_fragment_alignment(
+      used_models[[model_index[j]]], drawn$tx_start[j],
+      drawn$fragment_length[j]
+    )
+  })
+  start <- vapply(alignments, function(alignment) alignment$pos, integer(1))
+  end <- vapply(alignments, function(alignment) alignment$end, integer(1))
+  # `sequence` is transcript-oriented (5'->3' of the mRNA), matching the
+  # biological fragment/read direction; it is what codon/end-motif biases and
+  # the ground-truth table use. SAM/BAM SEQ must instead be reported relative
+  # to the reference (genome plus-strand), so for minus-strand fragments we
+  # store the reverse complement separately rather than reusing `sequence`
+  # when writing alignments.
+  reference_sequence <- drawn$sequence
+  minus <- strand != "+"
+  reference_sequence[minus] <- as.character(Biostrings::reverseComplement(
+    Biostrings::DNAStringSet(drawn$sequence[minus])
+  ))
+  result <- data.table::data.table(
+    seqnames = chromosome,
+    start = start,
+    end = end,
+    strand = strand,
+    cigar = vapply(alignments, function(alignment) alignment$cigar, character(1)),
+    score = drawn$score,
+    sampling_group = drawn$sampling_group,
+    transcript_id = transcript_id,
+    ribosome_site = signal_position,
+    signal_position = signal_position,
+    fragment_start = start,
+    fragment_end = end,
+    five_prime_end = ifelse(minus, end, start),
+    three_prime_end = ifelse(minus, start, end),
+    fragment_length = drawn$fragment_length,
+    site_offset = drawn$site_offset,
+    site_reference = geometry$site_reference,
+    geometry_probability = drawn$geometry_probability,
+    sequence = drawn$sequence,
+    reference_sequence = reference_sequence,
+    codon = drawn$codon,
+    frame = drawn$frame,
+    five_prime_kmer = end_bias_kmer(drawn$sequence, geometry$five_prime_bias),
+    three_prime_kmer = end_bias_kmer(drawn$sequence, geometry$three_prime_bias, TRUE),
+    end_bias_weight = drawn$end_bias_weight,
+    codon_bias_weight = drawn$codon_bias_weight,
+    frame_bias_weight = drawn$frame_bias_weight,
+    fragment_bias_weight = drawn$bias_weight,
+    final_probability = drawn$probability
+  )
   result[, fragment_id := sprintf("fragment_%d", seq_len(.N))]
   result
 }
