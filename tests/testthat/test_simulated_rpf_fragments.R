@@ -266,6 +266,35 @@ test_that("boundary renormalization preserves all counts", {
   expect_equal(fragments$geometry_probability, 1)
 })
 
+test_that("boundary renormalization moves offsets only where nothing fits", {
+  fixture <- make_fragment_fixture()
+  # tx_plus is 20 nt: genomic 101-110 are transcript positions 1-10 and
+  # 201-210 are 11-20. With 14-nt fragments and offsets 9-12, nothing fits at
+  # position 1 (offset becomes 0) or 20 (offset becomes 13), while at
+  # position 12 the offsets 9-11 fit and are kept unchanged.
+  signals <- make_fragment_signals(scores = c(50L, 0L))[c(1, 1, 1)]
+  signals[, `:=`(signal_position = c(101L, 202L, 210L), score = 60L)]
+  signals[, `:=`(start = signal_position, end = signal_position)]
+  fragments <- make_simulated_rpf_fragments(
+    signals, fixture$models, 14L,
+    list(source = "user", site_offset = 9:12, boundary_action = "renormalize")
+  )
+
+  offsets <- split(fragments$site_offset, fragments$signal_position)
+  expect_identical(unique(offsets[["101"]]), 0L)
+  expect_identical(unique(offsets[["210"]]), 13L)
+  expect_true(all(offsets[["202"]] %in% 9:11))
+  expect_equal(unique(fragments[signal_position == 202L, geometry_probability]), 1 / 3)
+  expect_equal(sum(fragments$score), 180L)
+  expect_error(
+    make_simulated_rpf_fragments(
+      signals, fixture$models, 14L,
+      list(source = "user", site_offset = 9:12, boundary_action = "error")
+    ),
+    "Cannot create a complete fragment"
+  )
+})
+
 test_that("former physical function names remain compatibility aliases", {
   fixture <- make_fragment_fixture()
   expect_warning(

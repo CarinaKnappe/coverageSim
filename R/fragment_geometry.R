@@ -568,18 +568,32 @@ fragment_feature_weights <- function(values, fragment_lengths, bias, feature) {
   weights[match(key, key[first])]
 }
 
-# Lengths and offsets for a signal position near a transcript end, where none
+# Lengths and offsets for signal positions near a transcript end, where none
 # of the usual combinations fits: keep the lengths that fit the transcript and
 # move each offset to the nearest value that keeps the fragment inside it.
+# All such positions are handled at once; `signal_row` numbers them 1, 2, ...
+# in the order of `site_tx`, and rows come in that order, then in the order of
+# `candidates`, with offsets that end up equal merged.
 clamped_fragment_candidates <- function(candidates, site_tx, transcript_length) {
-  valid <- candidates[fragment_length <= transcript_length]
-  if (!nrow(valid)) return(valid)
-  valid[, site_offset := vapply(seq_len(.N), function(j) {
-    lower <- max(0L, site_tx + fragment_length[j] - 1L - transcript_length)
-    upper <- min(fragment_length[j] - 1L, site_tx - 1L)
-    min(max(site_offset[j], lower), upper)
-  }, integer(1))]
-  valid[, .(probability = sum(probability)), by = .(fragment_length, site_offset)]
+  n_pairs <- nrow(candidates)
+  signal_row <- rep(seq_along(site_tx), each = n_pairs)
+  candidate_index <- rep(seq_len(n_pairs), times = length(site_tx))
+  fragment_length <- candidates$fragment_length[candidate_index]
+  keep <- which(fragment_length <= transcript_length[signal_row])
+  signal_row <- signal_row[keep]
+  candidate_index <- candidate_index[keep]
+  fragment_length <- fragment_length[keep]
+  site <- site_tx[signal_row]
+  lower <- pmax(0L, site + fragment_length - 1L - transcript_length[signal_row])
+  upper <- pmin(fragment_length - 1L, site - 1L)
+  clamped <- data.table::data.table(
+    signal_row = signal_row,
+    fragment_length = fragment_length,
+    site_offset = pmin(pmax(candidates$site_offset[candidate_index], lower), upper),
+    probability = candidates$probability[candidate_index]
+  )
+  clamped[, .(probability = sum(probability)),
+          by = .(signal_row, fragment_length, site_offset)]
 }
 
 # Every fragment each signal position could give rise to, with its weights.
@@ -632,13 +646,14 @@ fragment_candidates <- function(signal_table, transcript_models, candidates,
     tabulate(pairs$signal_row, nbins = n_signal) == 0L
   if (geometry$boundary_action == "renormalize" && any(nothing_fits)) {
     clamped_rows <- which(nothing_fits)
-    clamped <- lapply(clamped_rows, function(i) {
-      clamped_fragment_candidates(candidates, site_tx[i],
-                                  used_models[[model_index[i]]]$length)
-    })
-    nothing_fits[clamped_rows] <- vapply(clamped, nrow, integer(1)) == 0L
-    # rbindlist() numbers the tables 1, 2, ...; turn that into signal rows.
-    clamped <- data.table::rbindlist(clamped, idcol = "signal_row")
+    model_length <- vapply(used_models[model_index[clamped_rows]], function(model) {
+      model$length
+    }, integer(1))
+    clamped <- clamped_fragment_candidates(candidates, site_tx[clamped_rows],
+                                           model_length)
+    nothing_fits[clamped_rows] <- tabulate(clamped$signal_row,
+                                           nbins = length(clamped_rows)) == 0L
+    # The clamped rows are numbered 1, 2, ...; turn that into signal rows.
     if (nrow(clamped)) {
       clamped[, signal_row := clamped_rows[signal_row]]
       pairs <- rbind(pairs, clamped)[order(signal_row)]
