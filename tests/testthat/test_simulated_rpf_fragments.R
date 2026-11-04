@@ -358,6 +358,13 @@ test_that("a library whose reads were all left out is written as an empty file",
   expect_length(GenomicAlignments::readGAlignments(files[["default"]]), 0L)
 })
 
+test_that("the removed boundary action adjust_offset gives a clear error", {
+  expect_error(
+    normalize_fragment_geometry(list(boundary_action = "adjust_offset")),
+    "no longer exists"
+  )
+})
+
 test_that("former physical function names remain compatibility aliases", {
   fixture <- make_fragment_fixture()
   expect_warning(

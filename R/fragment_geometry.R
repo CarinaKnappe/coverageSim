@@ -5,9 +5,6 @@
 # inside a loop. Unknown field names are rejected rather than ignored: a
 # misspelled field would otherwise be silently dropped and the default used, so
 # the simulation would quietly not do what was asked.
-#
-# "adjust_offset" is an older name for "renormalize" and is accepted for
-# compatibility; the two do the same thing.
 normalize_fragment_geometry <- function(fragment_geometry) {
   defaults <- list(
     source = "default",
@@ -39,11 +36,13 @@ normalize_fragment_geometry <- function(fragment_geometry) {
        any(geometry$site_offset != as.integer(geometry$site_offset)))) {
     stop("fragment_geometry$site_offset must be NULL or non-negative integers")
   }
-  if (!geometry$boundary_action %in% c("error", "renormalize", "adjust_offset")) {
-    stop("fragment_geometry$boundary_action must be 'error' or 'renormalize'")
-  }
   if (identical(geometry$boundary_action, "adjust_offset")) {
-    geometry$boundary_action <- "renormalize"
+    stop("fragment_geometry$boundary_action 'adjust_offset' no longer exists: ",
+         "offsets are not shifted at transcript ends any more. Use 'renormalize' ",
+         "(positions without room for a fragment get no reads) or 'error'")
+  }
+  if (!geometry$boundary_action %in% c("error", "renormalize")) {
+    stop("fragment_geometry$boundary_action must be 'error' or 'renormalize'")
   }
   if (!is.null(geometry$site_offset)) {
     geometry$site_offset <- as.integer(geometry$site_offset)
