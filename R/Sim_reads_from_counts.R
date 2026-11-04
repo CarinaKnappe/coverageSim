@@ -113,8 +113,14 @@
 #' (`"p_site"` or `"a_site"`; also selects the default \code{seq_bias} table's
 #' site convention, see \code{seq_bias} above), a joint `distribution` with fragment_length,
 #' site_offset, and probability columns, and `boundary_action`. The default
-#' `"renormalize"` conditions probabilities on valid boundary geometry and
-#' preserves counts; `"error"` rejects impossible geometry.
+#' `"renormalize"` keeps, near a transcript end, only the fragment lengths and
+#' offsets that fit inside the transcript. A position where none of the
+#' configured lengths and offsets fits (a ribosome too close to the end for the
+#' footprints the distribution allows) gets no reads: they
+#' go to the other positions of the same region of the same transcript, and if
+#' no position of that region with reads has room, they are left out. Reads left out are
+#' reported in a message and in `<sample>_dropped_reads.tsv` next to the
+#' library file. `"error"` stops at the first such position.
 #' End-bias sources may also be `"user"` or `"learned"` with a table of
 #' `kmer`, `weight`, and optionally `fragment_length`; use
 #' \code{make_synthetic_end_bias()} to create a simple explicit profile.
@@ -345,6 +351,11 @@ simNGScoverage <- function(simGenome,
     count_check[is.na(count_check)] <- 0
     stopifnot(isTRUE(all.equal(count_check$expected, count_check$actual)))
     dt_final <- dt_final[score > 0,]
+    # The region labels are only needed to build fragments; point libraries
+    # are written without them, as before.
+    if (!(fragment_mode == "simulated_rpf" && libtypes[s] == "RFP")) {
+      dt_final[, sampling_group := NULL]
+    }
     simulated_rpf <- fragment_mode == "simulated_rpf" && libtypes[s] == "RFP"
     if (simulated_rpf) {
       fragment_table <- make_simulated_rpf_fragments(
@@ -353,7 +364,15 @@ simNGScoverage <- function(simGenome,
         fragment_lengths = unlist(read_lengths_per[libtypes[s]], use.names = FALSE),
         fragment_geometry = fragment_geometry
       )
-      stopifnot(isTRUE(all.equal(sum(fragment_table$score), sum(dt_final$score))))
+      dropped <- attr(fragment_table, "dropped_reads")
+      if (nrow(dropped)) {
+        message("-- ", assay_column, ": ", sum(dropped$reads), " reads left out in ",
+                nrow(dropped), " transcript region(s) without a position that ",
+                "has reads and room for a complete fragment; see ",
+                assay_column, "_dropped_reads.tsv")
+      }
+      stopifnot(isTRUE(all.equal(sum(fragment_table$score) + sum(dropped$reads),
+                                 sum(dt_final$score))))
       gr_final <- simulated_rpf_alignments(
         fragment_table,
         seqinfo = fill_missing_seqlengths(GenomeInfoDb::seqinfo(mrna_ranges),
@@ -370,6 +389,7 @@ simNGScoverage <- function(simGenome,
     file_base <- file.path(out_dir, assay_column)
     if (simulated_rpf) {
       write_fragment_ground_truth(fragment_table, file_base, ground_truth)
+      write_dropped_reads(dropped, file_base)
     } else if (!identical(ground_truth, FALSE) && !is.null(ground_truth)) {
       warning("Ground truth is currently written only for simulated RPF libraries")
     }
@@ -508,8 +528,10 @@ nt_coverage_all_regions <- function(count_table_regions, libClass,
         })
         sample <- unlist(sample, use.names = FALSE)
       }
+      # Which region of which transcript each position belongs to, so that
+      # fragment building can keep each region's reads within that region.
+      dt_region[, sampling_group := rep(paste(region, seq_along(sampled_lengths), sep = ":"), sampled_lengths)]
       if (defer_counts) {
-        dt_region[, sampling_group := rep(paste(region, seq_along(sampled_lengths), sep = ":"), sampled_lengths)]
         dt_region[, read_count := rep(region_counts, sampled_lengths)]
       }
 

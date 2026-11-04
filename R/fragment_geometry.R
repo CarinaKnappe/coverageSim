@@ -568,34 +568,6 @@ fragment_feature_weights <- function(values, fragment_lengths, bias, feature) {
   weights[match(key, key[first])]
 }
 
-# Lengths and offsets for signal positions near a transcript end, where none
-# of the usual combinations fits: keep the lengths that fit the transcript and
-# move each offset to the nearest value that keeps the fragment inside it.
-# All such positions are handled at once; `signal_row` numbers them 1, 2, ...
-# in the order of `site_tx`, and rows come in that order, then in the order of
-# `candidates`, with offsets that end up equal merged.
-clamped_fragment_candidates <- function(candidates, site_tx, transcript_length) {
-  n_pairs <- nrow(candidates)
-  signal_row <- rep(seq_along(site_tx), each = n_pairs)
-  candidate_index <- rep(seq_len(n_pairs), times = length(site_tx))
-  fragment_length <- candidates$fragment_length[candidate_index]
-  keep <- which(fragment_length <= transcript_length[signal_row])
-  signal_row <- signal_row[keep]
-  candidate_index <- candidate_index[keep]
-  fragment_length <- fragment_length[keep]
-  site <- site_tx[signal_row]
-  lower <- pmax(0L, site + fragment_length - 1L - transcript_length[signal_row])
-  upper <- pmin(fragment_length - 1L, site - 1L)
-  clamped <- data.table::data.table(
-    signal_row = signal_row,
-    fragment_length = fragment_length,
-    site_offset = pmin(pmax(candidates$site_offset[candidate_index], lower), upper),
-    probability = candidates$probability[candidate_index]
-  )
-  clamped[, .(probability = sum(probability)),
-          by = .(signal_row, fragment_length, site_offset)]
-}
-
 # Every fragment each signal position could give rise to, with its weights.
 #
 # Each position is combined with every length-and-offset pair of `candidates`,
@@ -642,23 +614,11 @@ fragment_candidates <- function(signal_table, transcript_models, candidates,
     probability = candidates$probability[candidate_index[fits]]
   )
 
+  # With "renormalize", a position where no fragment fits simply has no
+  # candidates; make_simulated_rpf_fragments() moves or drops its reads.
   nothing_fits <- has_model & !is.na(site_tx) &
-    tabulate(pairs$signal_row, nbins = n_signal) == 0L
-  if (geometry$boundary_action == "renormalize" && any(nothing_fits)) {
-    clamped_rows <- which(nothing_fits)
-    model_length <- vapply(used_models[model_index[clamped_rows]], function(model) {
-      model$length
-    }, integer(1))
-    clamped <- clamped_fragment_candidates(candidates, site_tx[clamped_rows],
-                                           model_length)
-    nothing_fits[clamped_rows] <- tabulate(clamped$signal_row,
-                                           nbins = length(clamped_rows)) == 0L
-    # The clamped rows are numbered 1, 2, ...; turn that into signal rows.
-    if (nrow(clamped)) {
-      clamped[, signal_row := clamped_rows[signal_row]]
-      pairs <- rbind(pairs, clamped)[order(signal_row)]
-    }
-  }
+    tabulate(pairs$signal_row, nbins = n_signal) == 0L &
+    geometry$boundary_action == "error"
 
   # Stop at the first position that cannot be placed, with the same message as
   # when positions were placed one at a time.
@@ -719,35 +679,112 @@ fragment_candidates <- function(signal_table, transcript_models, candidates,
 # compete across the whole transcript, which is what happens in a real library;
 # drawing per position keeps each position's count fixed, which is useful when
 # the point is to reproduce a given profile exactly.
+#
+# A group none of whose positions has room for a complete fragment cannot
+# receive its reads; they are left out and listed in the "dropped_reads"
+# attribute of the result.
 allocate_fragment_candidates <- function(candidates, signal_table, joint) {
-  if (joint) {
-    groups <- if ("sampling_group" %in% names(signal_table)) {
-      signal_table$sampling_group
-    } else signal_table$transcript_id
-  } else groups <- seq_len(nrow(signal_table))
+  groups <- if (joint) fragment_sampling_groups(signal_table) else {
+    seq_len(nrow(signal_table))
+  }
+  # The read budget of each group, from all of its positions.
+  budgets <- data.table::data.table(sampling_group = groups,
+                                    transcript_id = signal_table$transcript_id)
+  if ("read_count" %in% names(signal_table)) {
+    budgets[, read_count := signal_table$read_count]
+    budgets <- budgets[, .(transcript_id = transcript_id[1],
+                           total = if (data.table::uniqueN(read_count) == 1L) {
+                             read_count[1]
+                           } else NA_real_), by = sampling_group]
+  } else {
+    budgets[, score := signal_table$score]
+    budgets <- budgets[, .(transcript_id = transcript_id[1],
+                           total = round(sum(score))), by = sampling_group]
+  }
+  if (anyNA(budgets$total) || any(budgets$total < 0) ||
+      any(budgets$total != floor(budgets$total))) {
+    stop("Invalid fragment sampling budget")
+  }
+  dropped <- budgets[total > 0 & !sampling_group %in% groups[candidates$signal_row],
+                     .(sampling_group = as.character(sampling_group),
+                       transcript_id = as.character(transcript_id),
+                       reads = as.numeric(total))]
+
   candidates[, sampling_group := groups[signal_row]]
   candidates[, probability := geometry_probability * bias_weight *
                signal_table$score[signal_row]]
   if (any(!is.finite(candidates$probability))) {
     stop("End-bias strength produces non-finite weights; reduce strength")
   }
+  candidates[, budget := budgets$total[match(sampling_group, budgets$sampling_group)]]
   # No signal positions at all: there is nothing to draw, and the table stays
-  # empty instead of reaching the budget check with no budget.
-  if (!nrow(candidates)) return(candidates[, score := integer(0)])
-  candidates[, c("probability", "score") := {
-    rows <- unique(signal_row)
-    total <- if ("read_count" %in% names(signal_table)) {
-      unique(signal_table$read_count[rows])
-    } else round(sum(signal_table$score[rows]))
-    if (length(total) != 1L || total < 0 || total != floor(total)) {
-      stop("Invalid fragment sampling budget")
-    }
-    if (sum(probability) <= 0) stop("End-bias weights exclude every feasible fragment")
-    probability <- probability / max(probability)
-    p <- probability / sum(probability)
-    list(p, as.integer(stats::rmultinom(1L, total, p)))
-  }, by = sampling_group]
+  # empty instead of reaching the draw with no budget.
+  if (!nrow(candidates)) {
+    candidates[, budget := NULL]
+    candidates[, score := integer(0)]
+  } else {
+    candidates[, c("probability", "score") := {
+      if (sum(probability) <= 0) stop("End-bias weights exclude every feasible fragment")
+      probability <- probability / max(probability)
+      p <- probability / sum(probability)
+      list(p, as.integer(stats::rmultinom(1L, budget[1], p)))
+    }, by = sampling_group]
+    candidates[, budget := NULL]
+  }
+  data.table::setattr(candidates, "dropped_reads", dropped)
   candidates
+}
+
+# The groups whose read budgets are kept: the region of a transcript when the
+# simulation labelled it (sampling_group), otherwise the whole transcript.
+fragment_sampling_groups <- function(signal_table) {
+  groups <- if ("sampling_group" %in% names(signal_table)) {
+    signal_table$sampling_group
+  } else signal_table$transcript_id
+  if (anyNA(groups)) stop("sampling_group and transcript_id must not be missing")
+  groups
+}
+
+# Reads at a position where none of the configured fragment lengths and
+# offsets fits inside the transcript.
+#
+# This happens close to either end of an mRNA, where a ribosome has no room for
+# the footprints the distribution allows. Such reads go to the other positions
+# of the same region of the same transcript, in proportion to the reads those
+# positions already have, so the region keeps its read count. If no other
+# position of the region has both reads and room (positions without reads were
+# removed before this step), the region loses these reads; they are returned in
+# `dropped`. Used when each position keeps its own count (its `read_count` if
+# given, else its `score`); when reads are drawn per group (end bias),
+# allocate_fragment_candidates() does this by itself.
+move_unplaceable_reads <- function(signal_table, placeable) {
+  column <- if ("read_count" %in% names(signal_table)) "read_count" else "score"
+  count <- signal_table[[column]]
+  stuck <- which(!placeable & count > 0)
+  if (!length(stuck)) return(list(signal_table = signal_table, dropped = NULL))
+  signal_table <- data.table::copy(signal_table)
+  groups <- fragment_sampling_groups(signal_table)
+  involved <- which(groups %in% groups[stuck])
+  rows_per_group <- split(involved, factor(groups[involved],
+                                           levels = unique(groups[stuck])))
+  dropped <- list()
+  for (rows in rows_per_group) {
+    from <- rows[!placeable[rows] & count[rows] > 0]
+    to <- rows[placeable[rows] & count[rows] > 0]
+    reads <- sum(count[from])
+    count[from] <- count[from] * 0L
+    if (length(to)) {
+      count[to] <- count[to] + as.vector(stats::rmultinom(1L, reads, count[to]))
+    } else {
+      dropped[[length(dropped) + 1L]] <- data.table::data.table(
+        sampling_group = as.character(groups[from[1]]),
+        transcript_id = as.character(signal_table$transcript_id[from[1]]),
+        reads = as.numeric(reads)
+      )
+    }
+  }
+  data.table::set(signal_table, j = column, value = count)
+  list(signal_table = signal_table, dropped = data.table::rbindlist(dropped))
 }
 
 # Turn signal positions into whole fragments with real coordinates.
@@ -759,13 +796,15 @@ allocate_fragment_candidates <- function(candidates, signal_table, joint) {
 # fits inside its transcript, and hands back fragments ready to be written out.
 #
 # Transcript ends are the awkward case: near them, some length-and-offset
-# combinations would run past the edge. Real libraries do produce reads there, so
-# refusing outright would lose signal that genuinely exists, but letting a
-# fragment hang over the edge would invent sequence. `boundary_action` chooses:
-# "error" stops, and "renormalize" keeps only the combinations that do fit and
-# redistributes the probability among them, nudging the offset to the nearest
-# feasible value when no length fits otherwise. The result is that positions near
-# an end draw from a narrower set of geometries, which is what really happens.
+# combinations would run past the edge, and letting a fragment hang over the
+# edge would invent sequence. `boundary_action` chooses: "error" stops, and
+# "renormalize" keeps only the combinations that do fit and redistributes the
+# probability among them, so positions near an end draw from a narrower set of
+# geometries. Where none of the configured combinations fits (a ribosome too
+# close to the end for the footprints the distribution allows), the position
+# gets no reads: they go to other positions of the same region, or are left out
+# if no other position of the region has both signal and room.
+# Reads left out are listed in the "dropped_reads" attribute of the result.
 make_simulated_rpf_fragments <- function(signal_table, transcript_models,
                                          fragment_lengths, fragment_geometry) {
   geometry <- normalize_fragment_geometry(fragment_geometry)
@@ -779,9 +818,17 @@ make_simulated_rpf_fragments <- function(signal_table, transcript_models,
   candidate_table <- fragment_candidates(
     signal_table, transcript_models, candidates, geometry
   )
-  allocated <- allocate_fragment_candidates(
-    candidate_table, signal_table, has_active_fragment_bias(geometry)
-  )
+  joint <- has_active_fragment_bias(geometry)
+  dropped <- NULL
+  if (!joint) {
+    placeable <- tabulate(candidate_table$signal_row,
+                          nbins = nrow(signal_table)) > 0L
+    moved <- move_unplaceable_reads(signal_table, placeable)
+    signal_table <- moved$signal_table
+    dropped <- moved$dropped
+  }
+  allocated <- allocate_fragment_candidates(candidate_table, signal_table, joint)
+  if (joint) dropped <- attr(allocated, "dropped_reads")
   # Only the candidates that were drawn become fragments, often a small part of
   # all candidates. They stay in the order of the candidate table (signal row,
   # then candidate order), which sets the fragment ids.
@@ -850,6 +897,12 @@ make_simulated_rpf_fragments <- function(signal_table, transcript_models,
     final_probability = drawn$probability
   )
   result[, fragment_id := sprintf("fragment_%d", seq_len(.N))]
+  if (is.null(dropped) || !nrow(dropped)) {
+    dropped <- data.table::data.table(sampling_group = character(0),
+                                      transcript_id = character(0),
+                                      reads = numeric(0))
+  }
+  data.table::setattr(result, "dropped_reads", dropped)
   result
 }
 
@@ -925,5 +978,25 @@ write_fragment_ground_truth <- function(fragment_table, file_base,
     "fragment_bias_weight", "final_probability"
   )
   data.table::fwrite(fragment_table[, ..columns], path, sep = "\t")
+  path
+}
+
+# Next to the library file: the reads of each transcript region that were left
+# out because no position of the region with reads has room for a complete
+# fragment (see make_simulated_rpf_fragments()). Written only when something
+# was left out.
+write_dropped_reads <- function(dropped, file_base) {
+  path <- paste0(file_base, "_dropped_reads.tsv")
+  if (!nrow(dropped)) {
+    # Not left over from an earlier run into the same folder.
+    if (file.exists(path)) file.remove(path)
+    return(NULL)
+  }
+  group <- as.character(dropped$sampling_group)
+  data.table::fwrite(data.table::data.table(
+    transcript_id = dropped$transcript_id,
+    region = ifelse(grepl(":", group, fixed = TRUE), sub(":.*", "", group), NA_character_),
+    reads = dropped$reads
+  ), path, sep = "\t")
   path
 }

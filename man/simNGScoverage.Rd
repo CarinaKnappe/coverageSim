@@ -167,8 +167,14 @@ The former name `"physical"` remains as a deprecated compatibility alias.}
 (`"p_site"` or `"a_site"`; also selects the default \code{seq_bias} table's
 site convention, see \code{seq_bias} above), a joint `distribution` with fragment_length,
 site_offset, and probability columns, and `boundary_action`. The default
-`"renormalize"` conditions probabilities on valid boundary geometry and
-preserves counts; `"error"` rejects impossible geometry.
+`"renormalize"` keeps, near a transcript end, only the fragment lengths and
+offsets that fit inside the transcript. A position where none of the
+configured lengths and offsets fits (a ribosome too close to the end for the
+footprints the distribution allows) gets no reads: they
+go to the other positions of the same region of the same transcript, and if
+no position of that region with reads has room, they are left out. Reads left out are
+reported in a message and in `<sample>_dropped_reads.tsv` next to the
+library file. `"error"` stops at the first such position.
 End-bias sources may also be `"user"` or `"learned"` with a table of
 `kmer`, `weight`, and optionally `fragment_length`; use
 \code{make_synthetic_end_bias()} to create a simple explicit profile.

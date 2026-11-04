@@ -31,10 +31,14 @@ samFromGAlignment <- function(x, path, seqinfo = GenomeInfoDb::seqinfo(x),
   chr_header <- paste("@SQ", paste0("SN:", seqnames(seqinfo)),
                       paste0("LN:",seqlengths(seqinfo)), sep = "\t")
 
-  reads <- paste(FLAGS, seqnames(x), start(x), MAPQ, cigar(x),
-                 RNEXT, PNEXT, TLEN, sequences, per_base_quality, "NH:i:1", sep = "\t")
-  if (!is.null(mcols(x)$score)) reads <- reads[rep.int(seq(length(reads)), mcols(x)$score)]
-  reads <- paste(paste0("read", seq(length(reads))), reads, sep = "\t")
+  # A library without reads is written as a header only.
+  reads <- character(0)
+  if (length(x)) {
+    reads <- paste(FLAGS, seqnames(x), start(x), MAPQ, cigar(x),
+                   RNEXT, PNEXT, TLEN, sequences, per_base_quality, "NH:i:1", sep = "\t")
+    if (!is.null(mcols(x)$score)) reads <- reads[rep.int(seq(length(reads)), mcols(x)$score)]
+    reads <- paste(paste0("read", seq(length(reads))), reads, sep = "\t")
+  }
 
   writeLines(c(chr_header, reads), path)
   res <- c(SAM = path)

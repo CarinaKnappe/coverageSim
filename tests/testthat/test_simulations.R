@@ -197,9 +197,13 @@ test_that("multiple transcripts on one chromosome retain counts through BAM expo
   )[[1]]
   expected <- sum(SummarizedExperiment::assay(fixture$region_count_table[, 1], "cds")) +
     sum(SummarizedExperiment::assay(fixture$region_count_table[, 1], "uorf"))
+  # A uORF too close to the transcript start for any complete fragment loses
+  # its reads; they are listed next to the BAM file.
+  dropped_path <- sub("[.]bam$", "_dropped_reads.tsv", bam_path)
+  dropped <- if (file.exists(dropped_path)) sum(data.table::fread(dropped_path)$reads) else 0
 
-  expect_equal(sum(truth$score), expected)
-  expect_equal(length(bam$qname), expected)
+  expect_equal(sum(truth$score) + dropped, expected)
+  expect_equal(length(bam$qname), sum(truth$score))
   expect_equal(unique(as.character(bam$rname)), "chr1")
   expect_gt(data.table::uniqueN(truth$transcript_id), 1L)
 })

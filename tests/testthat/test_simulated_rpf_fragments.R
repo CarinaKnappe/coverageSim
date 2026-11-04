@@ -266,33 +266,96 @@ test_that("boundary renormalization preserves all counts", {
   expect_equal(fragments$geometry_probability, 1)
 })
 
-test_that("boundary renormalization moves offsets only where nothing fits", {
+test_that("positions with no room for a whole fragment pass their reads on", {
   fixture <- make_fragment_fixture()
   # tx_plus is 20 nt: genomic 101-110 are transcript positions 1-10 and
   # 201-210 are 11-20. With 14-nt fragments and offsets 9-12, nothing fits at
-  # position 1 (offset becomes 0) or 20 (offset becomes 13), while at
-  # position 12 the offsets 9-11 fit and are kept unchanged.
-  signals <- make_fragment_signals(scores = c(50L, 0L))[c(1, 1, 1)]
+  # position 1 or 20, while at position 12 the offsets 9-11 fit.
+  signals <- make_fragment_signals()[c(1, 1, 1)]
   signals[, `:=`(signal_position = c(101L, 202L, 210L), score = 60L)]
+  signals[, `:=`(start = signal_position, end = signal_position)]
+  geometry <- list(source = "user", site_offset = 9:12, boundary_action = "renormalize")
+  fragments <- make_simulated_rpf_fragments(signals, fixture$models, 14L, geometry)
+
+  # All reads of the transcript end up at the one position with room, with
+  # unchanged offsets, and nothing is left out.
+  expect_identical(unique(fragments$signal_position), 202L)
+  expect_true(all(fragments$site_offset %in% 9:11))
+  expect_equal(sum(fragments$score), 180L)
+  expect_equal(nrow(attr(fragments, "dropped_reads")), 0L)
+  expect_error(
+    make_simulated_rpf_fragments(
+      signals, fixture$models, 14L, modifyList(geometry, list(boundary_action = "error"))
+    ),
+    "Cannot create a complete fragment"
+  )
+})
+
+test_that("reads stay in their region and are left out where no position has room", {
+  fixture <- make_fragment_fixture()
+  signals <- make_fragment_signals()[c(1, 1, 1)]
+  signals[, `:=`(signal_position = c(101L, 202L, 210L), score = c(60L, 30L, 20L),
+                 sampling_group = c("leader:1", "cds:1", "cds:1"))]
+  signals[, `:=`(start = signal_position, end = signal_position)]
+  plain <- list(source = "user", site_offset = 9:12, boundary_action = "renormalize")
+  with_end_bias <- c(plain, list(five_prime_bias = list(
+    source = "user", table = data.table::data.table(kmer = c("A", "C", "G", "T"),
+                                                    weight = c(2, 1, 1, 1))
+  )))
+
+  for (geometry in list(plain, with_end_bias)) {
+    fragments <- make_simulated_rpf_fragments(signals, fixture$models, 14L, geometry)
+    dropped <- attr(fragments, "dropped_reads")
+    # The cds keeps its 50 reads at its one position with room; the leader
+    # has no such position, so its 60 reads are left out and reported.
+    expect_identical(unique(fragments$signal_position), 202L)
+    expect_equal(sum(fragments$score), 50L)
+    expect_equal(dropped$sampling_group, "leader:1")
+    expect_equal(dropped$reads, 60)
+  }
+
+  base <- tempfile()
+  path <- write_dropped_reads(dropped, base)
+  written <- data.table::fread(path)
+  expect_equal(written$region, "leader")
+  expect_equal(written$reads, 60L)
+  expect_equal(written$transcript_id, "tx_plus")
+  # A later run into the same place without losses removes the old report.
+  expect_null(write_dropped_reads(dropped[0], base))
+  expect_false(file.exists(path))
+
+  expect_error(
+    make_simulated_rpf_fragments(signals[, sampling_group := NA_character_],
+                                 fixture$models, 14L, plain),
+    "must not be missing"
+  )
+})
+
+test_that("a per-position read_count is what moves when there is no room", {
+  fixture <- make_fragment_fixture()
+  signals <- make_fragment_signals()[c(1, 1)]
+  signals[, `:=`(signal_position = c(101L, 202L), score = 1L, read_count = c(7L, 5L))]
   signals[, `:=`(start = signal_position, end = signal_position)]
   fragments <- make_simulated_rpf_fragments(
     signals, fixture$models, 14L,
     list(source = "user", site_offset = 9:12, boundary_action = "renormalize")
   )
+  expect_identical(unique(fragments$signal_position), 202L)
+  expect_equal(sum(fragments$score), 12L)
+})
 
-  offsets <- split(fragments$site_offset, fragments$signal_position)
-  expect_identical(unique(offsets[["101"]]), 0L)
-  expect_identical(unique(offsets[["210"]]), 13L)
-  expect_true(all(offsets[["202"]] %in% 9:11))
-  expect_equal(unique(fragments[signal_position == 202L, geometry_probability]), 1 / 3)
-  expect_equal(sum(fragments$score), 180L)
-  expect_error(
-    make_simulated_rpf_fragments(
-      signals, fixture$models, 14L,
-      list(source = "user", site_offset = 9:12, boundary_action = "error")
-    ),
-    "Cannot create a complete fragment"
+test_that("a library whose reads were all left out is written as an empty file", {
+  fixture <- make_fragment_fixture()
+  signals <- make_fragment_signals()[1][, `:=`(signal_position = 101L, start = 101L, end = 101L)]
+  fragments <- make_simulated_rpf_fragments(
+    signals, fixture$models, 14L,
+    list(source = "user", site_offset = 12L, boundary_action = "renormalize")
   )
+  expect_equal(nrow(fragments), 0L)
+  expect_equal(attr(fragments, "dropped_reads")$reads, 2)
+  alignments <- simulated_rpf_alignments(fragments, GenomeInfoDb::seqinfo(fixture$transcripts))
+  files <- write_bam_library(alignments, tempfile(fileext = ".bam"))
+  expect_length(GenomicAlignments::readGAlignments(files[["default"]]), 0L)
 })
 
 test_that("former physical function names remain compatibility aliases", {
