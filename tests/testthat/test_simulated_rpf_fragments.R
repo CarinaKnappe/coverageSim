@@ -358,6 +358,38 @@ test_that("a library whose reads were all left out is written as an empty file",
   expect_length(GenomicAlignments::readGAlignments(files[["default"]]), 0L)
 })
 
+test_that("fragment coordinates for many fragments match the one-by-one calculation", {
+  fixture <- make_fragment_fixture()
+  # A third, plus-strand transcript with three exons, so fragments can span two
+  # introns.
+  three_exons <- build_transcript_models(GenomicRanges::GRangesList(
+    tx_three = GenomicRanges::GRanges(
+      "chr1", IRanges::IRanges(c(11L, 31L, 51L), width = c(6L, 4L, 12L)), "+",
+      exon_rank = 1:3
+    )
+  ))
+  models <- c(fixture$models, three_exons)
+  cases <- data.table::rbindlist(lapply(seq_along(models), function(k) {
+    data.table::CJ(model = k, length = 1:models[[k]]$length,
+                   start = 1:models[[k]]$length)[start + length - 1L <= models[[k]]$length]
+  }))
+  together <- fragment_alignments(models, cases$model, cases$start, cases$length)
+  one_by_one <- lapply(seq_len(nrow(cases)), function(j) {
+    transcript_fragment_alignment(models[[cases$model[j]]], cases$start[j], cases$length[j])
+  })
+  expect_identical(together$pos, vapply(one_by_one, `[[`, integer(1), "pos"))
+  expect_identical(together$end, vapply(one_by_one, `[[`, integer(1), "end"))
+  expect_identical(together$cigar, vapply(one_by_one, `[[`, character(1), "cigar"))
+  expect_true(any(grepl("N.*N", together$cigar)))
+
+  # One exon inside another: the fragment ends at the outer exon's end.
+  nested <- build_transcript_models(GenomicRanges::GRangesList(
+    tx = GenomicRanges::GRanges("chr1", IRanges::IRanges(c(101L, 111L), width = c(100L, 10L)), "+")
+  ))
+  expect_identical(fragment_alignments(nested, 1L, 1L, 110L)$end,
+                   transcript_fragment_alignment(nested[[1]], 1L, 110L)$end)
+})
+
 test_that("the removed boundary action adjust_offset gives a clear error", {
   expect_error(
     normalize_fragment_geometry(list(boundary_action = "adjust_offset")),

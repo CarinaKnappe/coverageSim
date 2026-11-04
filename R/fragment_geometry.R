@@ -527,6 +527,75 @@ transcript_fragment_alignment <- function(model, transcript_start,
   )
 }
 
+# Genome coordinates and CIGAR of many fragments at once: the same result as
+# transcript_fragment_alignment() for each fragment, without a loop over them.
+# `models` are transcript models, `model_index` says which one each fragment
+# belongs to, and the fragments are given in transcript coordinates.
+fragment_alignments <- function(models, model_index, transcript_start,
+                                fragment_length) {
+  n <- length(transcript_start)
+  if (!n) return(list(pos = integer(0), end = integer(0), cigar = character(0)))
+  # All exons of all models in one table, in transcript order. `base` moves
+  # each model's transcript coordinates past those of the models before it,
+  # so one sorted vector of exon starts serves every fragment.
+  exon_count <- vapply(models, function(model) length(model$exons), integer(1))
+  model_length <- vapply(models, function(model) as.numeric(model$length), numeric(1))
+  base <- c(0, cumsum(model_length))[seq_along(models)]
+  exon_model <- rep(seq_along(models), exon_count)
+  exon_tx_start <- unlist(lapply(models, function(model) model$cumulative_start))
+  exon_width <- unlist(lapply(models, function(model) GenomicRanges::width(model$exons)))
+  exon_genome_start <- unlist(lapply(models, function(model) GenomicRanges::start(model$exons)))
+  exon_genome_end <- unlist(lapply(models, function(model) GenomicRanges::end(model$exons)))
+  exon_minus <- rep(vapply(models, function(model) model$strand != "+", logical(1)),
+                    exon_count)
+  exon_key <- base[exon_model] + exon_tx_start
+
+  # The first and last exon each fragment touches; it covers the ones between.
+  transcript_end <- transcript_start + fragment_length - 1L
+  first <- findInterval(base[model_index] + transcript_start, exon_key)
+  last <- findInterval(base[model_index] + transcript_end, exon_key)
+  piece_count <- last - first + 1L
+  fragment <- rep(seq_len(n), piece_count)
+  exon <- first[fragment] + sequence(piece_count) - 1L
+
+  # The part of each exon the fragment covers, in genome coordinates.
+  offset_start <- pmax(transcript_start[fragment], exon_tx_start[exon]) - exon_tx_start[exon]
+  offset_end <- pmin(transcript_end[fragment], exon_tx_start[exon] + exon_width[exon] - 1L) -
+    exon_tx_start[exon]
+  minus <- exon_minus[exon]
+  piece_start <- ifelse(minus, exon_genome_end[exon] - offset_end,
+                        exon_genome_start[exon] + offset_start)
+  piece_end <- ifelse(minus, exon_genome_end[exon] - offset_start,
+                      exon_genome_start[exon] + offset_end)
+
+  # Pieces left to right on the genome; a gap between two is an intron (N).
+  order_pieces <- order(fragment, piece_start)
+  fragment <- fragment[order_pieces]
+  piece_start <- piece_start[order_pieces]
+  piece_end <- piece_end[order_pieces]
+  first_piece <- !duplicated(fragment)
+  last_piece <- !duplicated(fragment, fromLast = TRUE)
+  intron <- as.integer(c(piece_start[-1L], NA) - piece_end - 1L)
+  piece_text <- paste0(as.integer(piece_end - piece_start + 1L), "M",
+                       ifelse(last_piece, "", paste0(intron, "N")))
+  cigar <- piece_text[first_piece]
+  end <- piece_end[last_piece]
+  spliced <- which(piece_count > 1L)
+  if (length(spliced)) {
+    in_spliced <- fragment %in% spliced
+    cigar[spliced] <- vapply(split(piece_text[in_spliced], fragment[in_spliced]),
+                             paste, character(1), collapse = "")
+    # The rightmost end, also if one exon lies inside another.
+    end[spliced] <- vapply(split(piece_end[in_spliced], fragment[in_spliced]),
+                           max, numeric(1))
+  }
+  list(
+    pos = as.integer(piece_start[first_piece]),
+    end = as.integer(end),
+    cigar = cigar
+  )
+}
+
 has_active_fragment_bias <- function(geometry) {
   bias_names <- c("five_prime_bias", "three_prime_bias", "codon_bias", "frame_bias")
   any(vapply(geometry[bias_names], function(bias) {
@@ -845,14 +914,10 @@ make_simulated_rpf_fragments <- function(signal_table, transcript_models,
   chromosome <- vapply(used_models, function(model) {
     as.character(GenomicRanges::seqnames(model$exons)[1])
   }, character(1))[model_index]
-  alignments <- lapply(seq_len(nrow(drawn)), function(j) {
-    transcript_fragment_alignment(
-      used_models[[model_index[j]]], drawn$tx_start[j],
-      drawn$fragment_length[j]
-    )
-  })
-  start <- vapply(alignments, function(alignment) alignment$pos, integer(1))
-  end <- vapply(alignments, function(alignment) alignment$end, integer(1))
+  alignments <- fragment_alignments(used_models, model_index, drawn$tx_start,
+                                    drawn$fragment_length)
+  start <- alignments$pos
+  end <- alignments$end
   # `sequence` is transcript-oriented (5'->3' of the mRNA), matching the
   # biological fragment/read direction; it is what codon/end-motif biases and
   # the ground-truth table use. SAM/BAM SEQ must instead be reported relative
@@ -869,7 +934,7 @@ make_simulated_rpf_fragments <- function(signal_table, transcript_models,
     start = start,
     end = end,
     strand = strand,
-    cigar = vapply(alignments, function(alignment) alignment$cigar, character(1)),
+    cigar = alignments$cigar,
     score = drawn$score,
     sampling_group = drawn$sampling_group,
     transcript_id = transcript_id,
