@@ -166,6 +166,14 @@
 #' that an eligible Step-4 position is forced to a structural zero for a
 #' given simulated library, layered on top of the usual DMN sampling; see
 #' \code{rgdirmnom()}. Preserves the total read count per transcript region.
+#' @param cores positive whole number, default 1. How many samples are
+#' simulated at the same time, each in its own process. Every sample draws from
+#' its own random numbers, derived from the seed of the run, so a given seed
+#' gives the same result for any number of cores. Each process needs about as
+#' much memory as a run with one core, so the peak memory grows with
+#' \code{cores}. Values above the number of samples are lowered to it. On
+#' Windows, which cannot start processes this way, only 1 is possible; larger
+#' values fall back to 1 with a warning.
 #' @return an \code{\link[ORFik]{experiment}}. Next to the libraries in
 #'   \code{out_dir} it also writes \code{simulation_report.tsv}: one row per
 #'   setting of every step that made this run (\code{simGenome()},
@@ -202,7 +210,8 @@
 #      getting this wrong would put one gene's reads on another gene.
 #   3. Build the per-position weights from the sequence (see add_sequence_bias()
 #      and sim_sequence_bias()).
-#   4. Distribute each region's reads over its positions, one sample at a time.
+#   4. Distribute each region's reads over its positions, one sample at a time
+#      (or several side by side, see `cores`).
 #   5. Place a fragment around each signal position, then export.
 #
 # Between 4 and 5 the read total is checked: distributing reads must never create
@@ -250,7 +259,8 @@ simNGScoverage <- function(simGenome,
                            debug_coverage = FALSE,
                            dmn_family = c("dirichlet", "generalized"),
                            dmn_gdm_scale = 1,
-                           dmn_zero_inflation = 0) {
+                           dmn_zero_inflation = 0,
+                           cores = 1) {
   # Read before any setting is used, so recording cannot change the draws.
   rng_state <- current_rng_state()
   supplied <- names(match.call())[-1]
@@ -277,6 +287,7 @@ simNGScoverage <- function(simGenome,
   validate_dmn_gdm_scale(dmn_gdm_scale)
   validate_dmn_zero_inflation(dmn_zero_inflation)
   validate_rnase_bias(rnase_bias)
+  cores <- resolve_cores(cores)
   input_validation_controller()
 
   # 2. Load the annotation for the requested transcripts.
@@ -321,10 +332,11 @@ simNGScoverage <- function(simGenome,
 
   colnames <- colnames(assay)
   libtypes <- as.character(colData(count_table)$libtype)
-  files <- c()
+  run_env <- environment()
   message("- Sample coverage")
-  # 4. One sample at a time: distribute its reads, place fragments, export.
-  for (s in seq_along(colnames)) {
+  # 4. Per sample: distribute its reads, place fragments, export. Returns the
+  # file that was written.
+  simulate_sample <- function(s) {
     assay_column <- colnames[s]
     message("-- ", assay_column)
 
@@ -338,7 +350,7 @@ simNGScoverage <- function(simGenome,
                                         uorf_prop_within_gene, sampling,
                                         dmn_alpha_scale,
                                         dmn_family, dmn_gdm_scale, dmn_zero_inflation,
-                                        debug_coverage, env = environment(),
+                                        debug_coverage, env = run_env,
                                         defer_counts = defer_counts)
     # Distributing reads only moves them between positions, so the total must
     # match exactly. A difference here means a real defect, not rounding.
@@ -414,8 +426,14 @@ simNGScoverage <- function(simGenome,
         seqinfo = output_seqinfo
       )
     }
-    files <- c(files, unname(written_files["default"]))
+    unname(written_files["default"])
   }
+  # Every sample gets its own seed, drawn here from the run's random state, so
+  # the result does not depend on whether samples run one after another or side
+  # by side.
+  sample_seeds <- sample.int(.Machine$integer.max, length(colnames))
+  files <- unlist(run_samples(simulate_sample, sample_seeds,
+                              min(cores, length(colnames))), use.names = FALSE)
   replicates <- as.character(colData(count_table)$replicate)
   conditions <- as.character(colData(count_table)$condition)
   create.experiment(out_dir, exp_name, txdb = simGenome["txdb"],

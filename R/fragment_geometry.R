@@ -175,14 +175,20 @@ normalize_end_bias <- function(bias, bias_name) {
 # is a plain vector match rather than a data.table filter per fragment, because
 # it runs for every candidate fragment of every read: filtering the table once
 # per fragment cost about 4.5 ms, which made a 300-gene sample with an end bias
-# take more than twice as long as one without.
+# take more than twice as long as one without. Each distinct k-mer and length is
+# looked up only once, since millions of candidate fragments share a few hundred
+# of them.
 end_bias_weight <- function(sequence, fragment_length,
                             five_bias, three_bias) {
   lookup <- function(kmer, bias) {
     if (is.null(bias$table) || identical(bias$strength, 0)) {
       return(rep(1, length(sequence)))
     }
-    value <- toupper(kmer)
+    distinct_kmer <- unique(kmer)
+    distinct_length <- unique(fragment_length)
+    # Every combination of a distinct k-mer and a distinct length.
+    value <- rep(toupper(distinct_kmer), times = length(distinct_length))
+    value_length <- rep(distinct_length, each = length(distinct_kmer))
     table_kmer <- bias$table$kmer
     table_length <- bias$table$fragment_length
     table_weight <- bias$table$weight
@@ -190,7 +196,7 @@ end_bias_weight <- function(sequence, fragment_length,
     # lengths; a k-mer the table does not mention stays neutral.
     by_length <- !is.na(table_length)
     weight <- table_weight[by_length][match(
-      paste(value, fragment_length),
+      paste(value, value_length),
       paste(table_kmer[by_length], table_length[by_length])
     )]
     general <- is.na(weight)
@@ -198,7 +204,9 @@ end_bias_weight <- function(sequence, fragment_length,
       match(value[general], table_kmer[!by_length])
     ]
     weight[is.na(weight)] <- 1
-    weight ^ bias$strength
+    weight <- weight ^ bias$strength
+    weight[match(kmer, distinct_kmer) +
+             (match(fragment_length, distinct_length) - 1L) * length(distinct_kmer)]
   }
   extract_kmer <- function(bias, from_end = FALSE) {
     if (is.null(bias$table)) return(NULL)
@@ -628,7 +636,10 @@ fragment_feature_weights <- function(values, fragment_lengths, bias, feature) {
   if (is.null(bias$table) || identical(bias$strength, 0)) {
     return(rep(1, length(values)))
   }
-  key <- paste(values, fragment_lengths)
+  # One number per distinct (value, length) pair; cheaper than pasting the
+  # two together for millions of candidate fragments.
+  length_id <- match(fragment_lengths, unique(fragment_lengths))
+  key <- (match(values, unique(values)) - 1) * max(length_id, 0L) + length_id
   first <- !duplicated(key)
   weights <- vapply(which(first), function(j) {
     fragment_feature_weight(values[j], fragment_lengths[j], bias, feature)

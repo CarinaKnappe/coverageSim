@@ -39,7 +39,8 @@ simNGScoverage(
   debug_coverage = FALSE,
   dmn_family = c("dirichlet", "generalized"),
   dmn_gdm_scale = 1,
-  dmn_zero_inflation = 0
+  dmn_zero_inflation = 0,
+  cores = 1
 )
 }
 \arguments{
@@ -226,6 +227,15 @@ goal; the Details section of \code{rgdirmnom()} gives the numbers.}
 that an eligible Step-4 position is forced to a structural zero for a
 given simulated library, layered on top of the usual DMN sampling; see
 \code{rgdirmnom()}. Preserves the total read count per transcript region.}
+
+\item{cores}{positive whole number, default 1. How many samples are
+simulated at the same time, each in its own process. Every sample draws from
+its own random numbers, derived from the seed of the run, so a given seed
+gives the same result for any number of cores. Each process needs about as
+much memory as a run with one core, so the peak memory grows with
+\code{cores}. Values above the number of samples are lowered to it. On
+Windows, which cannot start processes this way, only 1 is possible; larger
+values fall back to 1 with a warning.}
 }
 \value{
 an \code{\link[ORFik]{experiment}}. Next to the libraries in

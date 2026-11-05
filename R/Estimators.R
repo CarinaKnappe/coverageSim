@@ -147,15 +147,25 @@ auto_correlation_genes <- function(dt, dist = 6, by.codon = TRUE, codon.vs.nt = 
 #' @return the input vector with applied rolling function
 autocor_window <- function(vec, max.lag, fill = NA, na.rm = FALSE,
                            padding.rm = FALSE, penalty = 1.5) {
+  # shapes(0) switches the smoothing off before it gets here.
+  if (length(max.lag) != 1L || is.na(max.lag) || max.lag < 1 ||
+      max.lag != round(max.lag)) {
+    stop("max.lag must be a whole number of at least 1")
+  }
   window <- max.lag*2 + 1
   split_2 <- ceiling(window/2)
   split_2_low <- floor(window/2)
   roll_function <- c(seq(split_2 , 2), 1, seq(2, split_2))^penalty
   padding_left <- padding_right <- rep(0, split_2_low*2)
-  roll <- frollapply_compat(c(padding_left, vec, padding_right),
-                            window = window,
-                            FUN = function(x) mean(x/roll_function, na.rm =T),
-                            align = "center", fill = NA)
+  # Each position becomes the mean of x / roll_function over its window,
+  # leaving out missing values like mean(na.rm = TRUE).
+  values <- c(padding_left, vec, padding_right)
+  missing <- is.na(values)
+  values[missing] <- 0
+  roll <- rolling_weighted_sum(values, 1 / roll_function)
+  roll <- if (any(missing)) {
+    roll / rolling_weighted_sum(as.numeric(!missing), rep(1, window))
+  } else roll / window
   if (padding.rm) {
     # padding.rm = TRUE removes all padding, an integer keeps that many
     # positions of padding on each side.

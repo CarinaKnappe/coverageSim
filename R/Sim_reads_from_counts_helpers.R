@@ -770,11 +770,7 @@ sim_sequence_bias <- function(ideal_coverage, lengths, alpha_matrix,
   if (!is.null(rnase_acf)) { # Lower order auto correlation
     edge_padding <- rep(0, length(rnase_acf) - 1)
     res <- lapply(res, function(x) {
-      x <- c(edge_padding, x, edge_padding)
-      frollapply_compat(x,
-                        window = length(rnase_acf),
-                        FUN = function(i) sum(i*rnase_acf),
-                        align = "center", fill = NA)
+      rolling_weighted_sum(c(edge_padding, x, edge_padding), rnase_acf)
     })
   }
   # Step 4: restore the scale. Smearing moved signal around; rescaling to the
