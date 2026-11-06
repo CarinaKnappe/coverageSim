@@ -133,7 +133,46 @@ test_that("BAM filters report excluded reads and retain explicit duplicates", {
   bam <- Rsamtools::asBam(sam, destination = tempfile())
   result <- read_end_learning_bam(bam, 20)
   expect_equal(sum(result$reads$count), 2L)
-  expect_equal(unname(result$diagnostics), c(9, 6, 1))
+  expect_equal(unname(result$diagnostics), c(9, 6, 1, 9))
+})
+
+write_learning_sam <- function(names, flags, positions) {
+  sam <- tempfile(fileext = ".sam")
+  records <- paste(names, flags, "chr1", positions, 30L, "28M", "*", 0, 0,
+                   paste(rep("A", 28L), collapse = ""), "*", "NH:i:1", sep = "\t")
+  writeLines(c("@SQ\tSN:chr1\tLN:1000", records), sam)
+  Rsamtools::asBam(sam, destination = tempfile())
+}
+
+test_that("a collapsed BAM gives the same reads as the same reads written out", {
+  # 3 identical reads at 100, 1 at 200 and 2 unmapped ones, written out line by
+  # line and collapsed into one line per sequence.
+  expanded <- write_learning_sam(paste0("r", 1:6), c(0L, 0L, 0L, 0L, 4L, 4L),
+                                 c(100L, 100L, 100L, 200L, 300L, 300L))
+  collapsed <- write_learning_sam(c("seq1_x3", "seq2_x1", "seq3_x2"), c(0L, 0L, 4L),
+                                  c(100L, 200L, 300L))
+  one_per_line <- read_end_learning_bam(expanded, 20)
+  as_counted <- read_end_learning_bam(collapsed, 20, collapsed_reads = TRUE)
+  expect_equal(as_counted$reads, one_per_line$reads)
+  expect_equal(as_counted$reads[position == 100L, count], 3L)
+  expect_equal(as_counted$diagnostics[c("reads", "flag_or_mapq_or_NH_excluded")],
+               c(reads = 6, flag_or_mapq_or_NH_excluded = 2))
+  expect_equal(as_counted$diagnostics[["bam_records"]], 3)
+  # Without collapsed_reads every line is one read.
+  expect_equal(sum(read_end_learning_bam(collapsed, 20)$reads$count), 2L)
+})
+
+test_that("collapsed_reads stops on read names without a count", {
+  bam <- write_learning_sam(c("seq1_x3", "r2"), c(0L, 0L), c(100L, 200L))
+  expect_error(read_end_learning_bam(bam, 20, collapsed_reads = TRUE),
+               "end in _x and the number of reads.*'r2'")
+  zero <- write_learning_sam("seq1_x0", 0L, 100L)
+  expect_error(read_end_learning_bam(zero, 20, collapsed_reads = TRUE), "zero reads")
+  huge <- write_learning_sam("seq1_x3000000000", 0L, 100L)
+  expect_error(read_end_learning_bam(huge, 20, collapsed_reads = TRUE), "more reads")
+  fixture <- make_end_learning_fixture()
+  expect_error(fit_learning_fixture(fixture, make_learning_bam(fixture),
+                                    collapsed_reads = NA), "TRUE or FALSE")
 })
 
 test_that("two-base motifs can be fit without inventing unsupported enrichment", {

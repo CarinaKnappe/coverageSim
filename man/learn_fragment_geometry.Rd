@@ -14,7 +14,8 @@ learn_fragment_geometry(
   min_reads_per_length = 100L,
   offset_search = 2L,
   min_mapq = 20L,
-  offset_relative_threshold = 1
+  offset_relative_threshold = 1,
+  collapsed_reads = FALSE
 )
 }
 \arguments{
@@ -32,7 +33,7 @@ whichever site the rest of the analysis works in.}
 
 \item{min_length, max_length}{Inclusive fragment-length limits.}
 
-\item{min_reads_per_length}{Minimum BAM records required for a length.}
+\item{min_reads_per_length}{Minimum number of reads required for a length.}
 
 \item{offset_search}{Number of nucleotides searched on each side of the
 default offset.}
@@ -58,6 +59,15 @@ is not directly reusable there. In-frame fraction can only identify the
 correct reading frame (offset modulo 3), not an exact absolute offset;
 two candidates a whole number of codons apart are collapsed to the
 better-supported one instead of being reported as independent jitter.}
+
+\item{collapsed_reads}{TRUE or FALSE (default FALSE). Some pipelines save
+time by storing identical reads only once and writing how often the read
+was seen at the end of its name: a line named \code{seq17_x250} stands for
+250 identical reads. Set TRUE for such BAM files; each line then counts as
+the number after \code{_x}. With FALSE every line counts as one read, so
+in a collapsed BAM a fragment seen 250 times would count as much as one
+seen once. With TRUE every read name must end in \code{_x} and a number,
+otherwise the function stops.}
 }
 \value{
 A simulator-ready fragment_geometry list. The diagnostics attribute

@@ -23,12 +23,13 @@
 #'   one codon apart. This only shifts the starting guess for the search; use
 #'   whichever site the rest of the analysis works in.
 #' @param min_length,max_length Inclusive fragment-length limits.
-#' @param min_reads_per_length Minimum BAM records required for a length.
+#' @param min_reads_per_length Minimum number of reads required for a length.
 #' @param offset_search Number of nucleotides searched on each side of the
 #'   default offset.
 #' @param min_mapq Minimum mapping quality. Default 20. Reads that could come
 #'   from several places in the genome carry no reliable position, so including
 #'   them would blur exactly the signal this function measures.
+#' @inheritParams learn_end_bias
 #' @param offset_relative_threshold Numeric in (0, 1], default 1. For each
 #'   fragment length, every candidate offset whose in-frame fraction is at
 #'   least this fraction of that length's best candidate is kept, instead of
@@ -52,14 +53,16 @@
 learn_fragment_geometry <- function(
     bam, transcripts, cds, site_reference = c("a_site", "p_site"),
     min_length = 25L, max_length = 34L, min_reads_per_length = 100L,
-    offset_search = 2L, min_mapq = 20L, offset_relative_threshold = 1) {
+    offset_search = 2L, min_mapq = 20L, offset_relative_threshold = 1,
+    collapsed_reads = FALSE) {
   site_reference <- match.arg(site_reference)
   validate_geometry_learning_input(
     bam, transcripts, cds, min_length, max_length,
     min_reads_per_length, offset_search, min_mapq, offset_relative_threshold
   )
+  validate_collapsed_reads(collapsed_reads)
   models <- transcript_geometry_models(transcripts)
-  observed <- read_end_learning_bam(bam, min_mapq)
+  observed <- read_end_learning_bam(bam, min_mapq, collapsed_reads)
   reads <- observed$reads[
     fragment_length >= min_length & fragment_length <= max_length
   ]

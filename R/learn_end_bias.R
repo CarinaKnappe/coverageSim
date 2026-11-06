@@ -20,6 +20,14 @@
 #' @param min_mapq Minimum mapping quality (default 20). NH greater than 1,
 #'   secondary, supplementary, failed-QC, paired and unmapped reads are excluded.
 #'   Duplicate-flagged reads are retained; missing NH is allowed.
+#' @param collapsed_reads TRUE or FALSE (default FALSE). Some pipelines save
+#'   time by storing identical reads only once and writing how often the read
+#'   was seen at the end of its name: a line named \code{seq17_x250} stands for
+#'   250 identical reads. Set TRUE for such BAM files; each line then counts as
+#'   the number after \code{_x}. With FALSE every line counts as one read, so
+#'   in a collapsed BAM a fragment seen 250 times would count as much as one
+#'   seen once. With TRUE every read name must end in \code{_x} and a number,
+#'   otherwise the function stops.
 #' @param ridge Positive penalty shrinking log preferences towards zero.
 #'   The per-length fragment totals are conditioned on, not learned as unbiased
 #'   length probabilities. Geometry probabilities only select supported lengths.
@@ -53,9 +61,9 @@ learn_end_bias <- function(bam, fasta, transcripts, cds, fragment_geometry,
                            k = 1L, by_length = FALSE, min_mapq = 20,
                            ridge = 1, maxit = 500L,
                            dmn_min_reads = 50L, dmn_min_sites = 20L,
-                           acf_max_lag = 9L) {
+                           acf_max_lag = 9L, collapsed_reads = FALSE) {
   validate_end_learning_input(bam, fasta, transcripts, cds, k, by_length,
-                              min_mapq, ridge, maxit,
+                              min_mapq, collapsed_reads, ridge, maxit,
                               dmn_min_reads, dmn_min_sites, acf_max_lag)
   geometry <- normalize_fragment_geometry(fragment_geometry)
   if (is.null(geometry$distribution)) {
@@ -70,7 +78,7 @@ learn_end_bias <- function(bam, fasta, transcripts, cds, fragment_geometry,
   models <- transcript_models(transcripts, fasta)
   opportunities <- end_learning_opportunities(models, cds, distribution, k)
   if (!nrow(opportunities)) stop("No valid CDS fragment opportunities")
-  observed <- read_end_learning_bam(bam, min_mapq)
+  observed <- read_end_learning_bam(bam, min_mapq, collapsed_reads)
   counted <- count_end_learning_reads(opportunities, observed$reads)
   if (!sum(counted$data$count)) stop("No usable reads match the supplied CDS geometry")
   fit <- fit_end_preferences(counted$data, k, by_length, ridge, maxit)
@@ -104,7 +112,7 @@ learn_end_bias <- function(bam, fasta, transcripts, cds, fragment_geometry,
     bam = normalizePath(bam), fasta = normalizePath(fasta),
     transcript_ids = names(transcripts), distribution = distribution,
     site_reference = geometry$site_reference, k = k, by_length = by_length,
-    min_mapq = min_mapq, ridge = ridge, maxit = maxit,
+    min_mapq = min_mapq, collapsed_reads = collapsed_reads, ridge = ridge, maxit = maxit,
     dmn_min_reads = dmn_min_reads, dmn_min_sites = dmn_min_sites,
     acf_max_lag = acf_max_lag,
     model = paste("conditional multinomial: transcript:length + codon +",
@@ -117,7 +125,8 @@ learn_end_bias <- function(bam, fasta, transcripts, cds, fragment_geometry,
 }
 
 validate_end_learning_input <- function(bam, fasta, transcripts, cds, k,
-                                        by_length, min_mapq, ridge, maxit,
+                                        by_length, min_mapq, collapsed_reads,
+                                        ridge, maxit,
                                         dmn_min_reads, dmn_min_sites,
                                         acf_max_lag) {
   for (path in list(bam, fasta)) {
@@ -142,6 +151,7 @@ validate_end_learning_input <- function(bam, fasta, transcripts, cds, k,
     stop("by_length must be TRUE or FALSE")
   }
   if (!scalar(min_mapq, 0, 255, TRUE)) stop("min_mapq must be between 0 and 255")
+  validate_collapsed_reads(collapsed_reads)
   if (!scalar(ridge, .Machine$double.eps)) stop("ridge must be positive and finite")
   if (!scalar(maxit, 1, Inf, TRUE)) stop("maxit must be a positive integer")
   if (!scalar(dmn_min_reads, 1, Inf, TRUE)) {
@@ -581,20 +591,47 @@ learning_alignment_cigar <- function(cigar) {
   normalized[match(cigar, distinct)]
 }
 
-read_end_learning_bam <- function(bam, min_mapq) {
-  fields <- c("rname", "pos", "cigar", "strand", "flag", "mapq")
+validate_collapsed_reads <- function(collapsed_reads) {
+  if (!is.logical(collapsed_reads) || length(collapsed_reads) != 1L ||
+      is.na(collapsed_reads)) {
+    stop("collapsed_reads must be TRUE or FALSE")
+  }
+}
+
+# How many reads each BAM line stands for. In a collapsed BAM the name ends in
+# _x and the count (seq17_x250 = 250 identical reads); otherwise one per line.
+read_multiplicity <- function(qname, records, collapsed_reads) {
+  if (!collapsed_reads) return(rep(1L, records))
+  bad <- !grepl("_x[0-9]+$", qname)
+  if (any(bad)) {
+    stop("collapsed_reads = TRUE needs every read name to end in _x and the ",
+         "number of reads, e.g. seq17_x250; '", qname[bad][1], "' does not")
+  }
+  count <- as.numeric(sub("^.*_x([0-9]+)$", "\\1", qname))
+  if (any(count < 1)) stop("Read '", qname[count < 1][1], "' stands for zero reads")
+  if (any(count > .Machine$integer.max)) {
+    stop("Read '", qname[count > .Machine$integer.max][1], "' stands for more ",
+         "reads than R can count in one line (", .Machine$integer.max, ")")
+  }
+  as.integer(count)
+}
+
+read_end_learning_bam <- function(bam, min_mapq, collapsed_reads = FALSE) {
+  fields <- c("rname", "pos", "cigar", "strand", "flag", "mapq",
+              if (collapsed_reads) "qname")
   file <- Rsamtools::BamFile(bam, yieldSize = 500000L)
   open(file)
   on.exit(close(file))
   reads <- data.table::data.table(chromosome = character(), position = integer(),
     five_position = integer(), strand = character(), cigar = character(),
     fragment_length = integer(), count = integer())
-  diagnostics <- c(bam_records = 0, flag_or_mapq_or_NH_excluded = 0, unsupported_cigar = 0)
+  diagnostics <- c(bam_records = 0, flag_or_mapq_or_NH_excluded = 0,
+                   unsupported_cigar = 0, reads = 0)
   repeat {
     raw <- Rsamtools::scanBam(file,
       param = Rsamtools::ScanBamParam(what = fields, tag = "NH"))[[1]]
     if (!length(raw$flag)) break
-    chunk <- filter_end_learning_reads(raw, min_mapq)
+    chunk <- filter_end_learning_reads(raw, min_mapq, collapsed_reads)
     diagnostics <- diagnostics + chunk$diagnostics
     reads <- data.table::rbindlist(list(reads, chunk$reads))[
       , .(count = sum(count)), by = .(
@@ -604,12 +641,17 @@ read_end_learning_bam <- function(bam, min_mapq) {
   list(reads = reads, diagnostics = diagnostics)
 }
 
-filter_end_learning_reads <- function(raw, min_mapq) {
+# The diagnostics count reads, so with collapsed_reads a line seq17_x250 counts
+# 250 times; bam_records counts lines.
+filter_end_learning_reads <- function(raw, min_mapq, collapsed_reads = FALSE) {
+  multiplicity <- read_multiplicity(raw$qname, length(raw$flag), collapsed_reads)
   keep <- bitwAnd(raw$flag, 1L + 4L + 256L + 512L + 2048L) == 0L & raw$mapq >= min_mapq
   if (!is.null(raw$tag$NH)) keep <- keep & (is.na(raw$tag$NH) | raw$tag$NH <= 1L)
   cigar <- learning_alignment_cigar(raw$cigar[keep])
   reads <- data.table::data.table(chromosome = as.character(raw$rname[keep]),
-    position = raw$pos[keep], strand = as.character(raw$strand[keep]), cigar = cigar)
+    position = raw$pos[keep], strand = as.character(raw$strand[keep]), cigar = cigar,
+    multiplicity = multiplicity[keep])
+  unsupported <- sum(reads[is.na(cigar), multiplicity])
   reads <- reads[!is.na(cigar)]
   if (nrow(reads)) {
     reads[, fragment_length := learning_cigar_width(cigar, reference = FALSE)]
@@ -617,7 +659,7 @@ filter_end_learning_reads <- function(raw, min_mapq) {
     reads[, five_position := ifelse(
       strand == "+", position, position + reference_width - 1L
     )]
-    reads <- reads[, .(count = .N), by = .(
+    reads <- reads[, .(count = sum(multiplicity)), by = .(
       chromosome, position, five_position, strand, cigar, fragment_length
     )]
   } else {
@@ -628,8 +670,9 @@ filter_end_learning_reads <- function(raw, min_mapq) {
     )
   }
   list(reads = reads, diagnostics = c(
-    bam_records = length(keep), flag_or_mapq_or_NH_excluded = sum(!keep),
-    unsupported_cigar = sum(is.na(cigar))))
+    bam_records = length(keep),
+    flag_or_mapq_or_NH_excluded = sum(multiplicity[!keep]),
+    unsupported_cigar = unsupported, reads = sum(multiplicity)))
 }
 
 learning_cigar_width <- function(cigar, reference = FALSE) {

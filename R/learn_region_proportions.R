@@ -20,6 +20,7 @@
 #' @param fragment_geometry Geometry list with exactly one site_offset for each
 #'   supported fragment_length.
 #' @param min_mapq Minimum mapping quality. Default 20.
+#' @inheritParams learn_end_bias
 #' @param overlap_action How to handle a site lying in several supplied
 #'   regions. \code{"priority"} (default) credits it to whichever region comes
 #'   first in \code{region_priority}, which suits the common case where one
@@ -42,11 +43,12 @@ learn_region_proportions <- function(
     bam, transcripts, regions, fragment_geometry, min_mapq = 20,
     overlap_action = c("priority", "fractional", "exclude"),
     region_priority = c("uorf", "cds", "leader", "trailer"),
-    pseudocount = 0.5) {
+    pseudocount = 0.5, collapsed_reads = FALSE) {
   overlap_action <- match.arg(overlap_action)
   validate_region_learning_input(
     bam, transcripts, regions, min_mapq, region_priority, pseudocount
   )
+  validate_collapsed_reads(collapsed_reads)
   geometry <- normalize_fragment_geometry(fragment_geometry)
   if (is.null(geometry$distribution)) {
     stop("Region learning requires an explicit length/offset distribution")
@@ -57,7 +59,7 @@ learn_region_proportions <- function(
     stop("Region learning requires one offset per fragment length")
   }
   models <- transcript_geometry_models(transcripts)
-  observed <- read_end_learning_bam(bam, min_mapq)
+  observed <- read_end_learning_bam(bam, min_mapq, collapsed_reads)
   projected <- project_region_learning_reads(
     observed$reads, models, distribution
   )
@@ -83,7 +85,7 @@ learn_region_proportions <- function(
       bam = normalizePath(bam), transcript_ids = names(transcripts),
       distribution = distribution, overlap_action = overlap_action,
       region_priority = region_priority, min_mapq = min_mapq,
-      pseudocount = pseudocount, created = as.character(Sys.time()),
+      collapsed_reads = collapsed_reads, pseudocount = pseudocount, created = as.character(Sys.time()),
       package_version = as.character(utils::packageVersion("coverageSim"))
     )
   )

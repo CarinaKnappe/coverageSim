@@ -17,7 +17,8 @@ learn_end_bias(
   maxit = 500L,
   dmn_min_reads = 50L,
   dmn_min_sites = 20L,
-  acf_max_lag = 9L
+  acf_max_lag = 9L,
+  collapsed_reads = FALSE
 )
 }
 \arguments{
@@ -58,6 +59,15 @@ estimating the concentration. Default 20.}
 
 \item{acf_max_lag}{Maximum codon lag used to learn local coverage
 autocorrelation. Default 9.}
+
+\item{collapsed_reads}{TRUE or FALSE (default FALSE). Some pipelines save
+time by storing identical reads only once and writing how often the read
+was seen at the end of its name: a line named \code{seq17_x250} stands for
+250 identical reads. Set TRUE for such BAM files; each line then counts as
+the number after \code{_x}. With FALSE every line counts as one read, so
+in a collapsed BAM a fragment seen 250 times would count as much as one
+seen once. With TRUE every read name must end in \code{_x} and a number,
+otherwise the function stops.}
 }
 \value{
 A list containing five_prime_bias, three_prime_bias, codon_bias and

@@ -12,7 +12,8 @@ learn_region_proportions(
   min_mapq = 20,
   overlap_action = c("priority", "fractional", "exclude"),
   region_priority = c("uorf", "cds", "leader", "trailer"),
-  pseudocount = 0.5
+  pseudocount = 0.5,
+  collapsed_reads = FALSE
 )
 }
 \arguments{
@@ -45,6 +46,15 @@ to catch no reads would be given a proportion of exactly zero, which asserts
 that it can never receive one -- a much stronger claim than the data
 supports, and one that would make the simulation leave that region empty in
 every replicate.}
+
+\item{collapsed_reads}{TRUE or FALSE (default FALSE). Some pipelines save
+time by storing identical reads only once and writing how often the read
+was seen at the end of its name: a line named \code{seq17_x250} stands for
+250 identical reads. Set TRUE for such BAM files; each line then counts as
+the number after \code{_x}. With FALSE every line counts as one read, so
+in a collapsed BAM a fragment seen 250 times would count as much as one
+seen once. With TRUE every read name must end in \code{_x} and a number,
+otherwise the function stops.}
 }
 \value{
 A covsim_region_fit list with simulator-ready region_proportion,
