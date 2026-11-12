@@ -108,7 +108,9 @@ organism/organelle with a different genetic code (e.g. mitochondrial,
 where TGA is not a stop) is out of scope here.}
 
 \item{max_uorfs}{= 1. Upper limit on how many upstream ORFs a gene may get,
-one whole number of at least 0 (0 = no uORFs).
+one whole number of at least 0 (0 = no uORFs). A gene can get fewer when
+its leader has no room left; a leader shorter than 4 nt gets none. If no
+gene has room for a uORF, simGenome() stops with an error.
 These are short reading frames in the leader that ribosomes can translate
 before reaching the main coding sequence, so they carry real signal and are
 not merely decoration.}
@@ -117,7 +119,10 @@ not merely decoration.}
 sequence: TRUE or FALSE.}
 
 \item{uorfs_can_overlap_cds}{= TRUE. Whether a uORF may run into the CDS:
-0 (FALSE) = no overlap, 1 (TRUE) = may overlap, 2 = must overlap.}
+0 (FALSE) = no overlap, 1 (TRUE) = may overlap, 2 = must overlap.
+Such a uORF starts in the leader and ends after the CDS start codon, so it
+needs \code{uorf_max_length} of at least 12: with 2 a smaller value
+stops with an error, with 1 all uORFs then stay in the leader.}
 
 \item{uorf_max_length}{= 60. Longest a uORF may be, in nucleotides
 including its start and stop codon: one whole number of at least 6 (a

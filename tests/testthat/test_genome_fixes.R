@@ -12,21 +12,44 @@ genome_orf_problems <- function(genome) {
     uorf_protein <- Biostrings::translate(ORFik::txSeqsFromFa(uorf, genome["genome"]))
     problems[["uorf_internal_stop"]] <-
       sum(Biostrings::alphabetFrequency(uorf_protein)[, "*"] > 1L)
+    uorf_seqs <- as.character(ORFik::txSeqsFromFa(uorf, genome["genome"]))
+    problems[["uorf_bad_ends"]] <- sum(
+      substr(uorf_seqs, 1L, 3L) != "ATG" |
+        !substring(uorf_seqs, nchar(uorf_seqs) - 2L) %in% c("TAA", "TAG", "TGA")
+    )
   }
   problems
 }
 
-test_that("uORFs overlapping the CDS never leave a stop codon inside the CDS", {
-  for (settings in list(list(overlap_cds = 2L, max_uorfs = 1),
-                        list(overlap_cds = 1L, max_uorfs = 3))) {
+test_that("overlapping uORFs keep their start and stop codons and leave the CDS intact", {
+  # Short leaders crowd several uORFs into a few nucleotides, so that their
+  # start, stop and internal codons overlap in different frames.
+  for (settings in list(list(overlap_cds = 2L, max_uorfs = 1, leader = 140),
+                        list(overlap_cds = 1L, max_uorfs = 3, leader = 140),
+                        list(overlap_cds = 2L, max_uorfs = 3, leader = 140),
+                        list(overlap_cds = 1L, max_uorfs = 3, leader = 10))) {
     for (seed in 1:2) {
       set.seed(seed)
-      genome <- suppressWarnings(suppressMessages(simGenome(
+      messages <- character()
+      genome <- withCallingHandlers(suppressWarnings(simGenome(
         n = 30, out_dir = tempfile("genome-"), max_uorfs = settings$max_uorfs,
         uorfs_can_overlap = TRUE, uorfs_can_overlap_cds = settings$overlap_cds,
+        leader_length = rep(settings$leader, 30),
         chromosome_layout = "compact", debug_on = FALSE
-      )))
-      expect_equal(unname(genome_orf_problems(genome)), c(0, 0, 0))
+      )), message = function(m) {
+        messages <<- c(messages, conditionMessage(m))
+        invokeRestart("muffleMessage")
+      })
+      info <- paste(unlist(settings), collapse = " ")
+      expect_equal(unname(genome_orf_problems(genome)), c(0, 0, 0, 0), info = info)
+      # Invalid uORFs are dropped, but the repair has to keep almost all of
+      # them: a broken repair would show up as many dropped uORFs.
+      dropped <- regmatches(messages, regexec("Dropped ([0-9]+) of ([0-9]+)", messages))
+      dropped <- Filter(length, dropped)
+      if (length(dropped)) {
+        counts <- as.numeric(dropped[[1]][2:3])
+        expect_lte(counts[1] / counts[2], 0.05, label = info)
+      }
     }
   }
 })
@@ -134,6 +157,10 @@ test_that("simGenome() explains every setting it cannot use", {
     list(list(uorf_max_length = 600), "every cds_length must be at least uorf_max_length + 3"),
     list(list(uorfs_can_overlap = NA), "uorfs_can_overlap must be TRUE or FALSE"),
     list(list(uorfs_can_overlap_cds = 1.5), "uorfs_can_overlap_cds must be 0 (FALSE), 1 (TRUE) or 2"),
+    list(list(max_uorfs = 1, uorfs_can_overlap_cds = 2, uorf_max_length = 9),
+         "uorfs_can_overlap_cds = 2 (every uORF runs into the CDS) needs uorf_max_length of at least 12"),
+    list(list(max_uorfs = 1, leader_length = rep(3, 3)),
+         "No gene has room for a uORF (a leader needs at least 4 nt)"),
     list(list(flank_length = 1.6), "flank_length must be whole numbers of at least 0"),
     list(list(chromosome_count = 1.6), "chromosome_count must be one whole number of at least 1"),
     list(list(start_codons = "XYZ"), "start_codons must be codons of three letters"),
@@ -161,4 +188,48 @@ test_that("simGenome() accepts the per-gene and single-value forms it supports",
   # Without a second exon there is no intron, so its length is not used.
   expect_equal(unname(genome_orf_problems(build(cds_exons = 1,
                                                 cds_intron_length = rep(0, 3)))), c(0, 0))
+})
+
+test_that("removing an internal uORF stop never changes a protected codon base", {
+  # A uORF on the plus strand, positions 1-12: ATG TGA ATG TAA, with an
+  # internal stop TGA at positions 4-6. Its third base (6) is protected, as if
+  # it were part of another uORF's start codon, so the first base (4) changes.
+  chromosome_seqs <- Biostrings::DNAStringSet(c(chr1 = "ATGTGAATGTAA"))
+  uorf <- GenomicRanges::GRangesList(GenomicRanges::GRanges("chr1:1-12:+"))
+  protected <- "chr1:6"
+  result <- replace_uorf_stop_bases(chromosome_seqs, uorf, list(6L), protected)
+  expect_equal(as.character(result[["chr1"]]), "ATGCGAATGTAA")
+  # With all three bases protected nothing changes.
+  result <- replace_uorf_stop_bases(chromosome_seqs, uorf, list(6L),
+                                    c("chr1:4", "chr1:5", "chr1:6"))
+  expect_equal(as.character(result[["chr1"]]), "ATGTGAATGTAA")
+  # On the minus strand a G is written (C on the transcript).
+  minus <- Biostrings::DNAStringSet(c(chr1 = as.character(
+    Biostrings::reverseComplement(Biostrings::DNAString("ATGTGAATGTAA")))))
+  uorf_minus <- GenomicRanges::GRangesList(GenomicRanges::GRanges("chr1:1-12:-"))
+  result <- replace_uorf_stop_bases(minus, uorf_minus, list(6L))
+  expect_equal(as.character(Biostrings::reverseComplement(result[["chr1"]])),
+               "ATGTGCATGTAA")
+})
+
+test_that("write_codons() writes codons strand-aware, also across an intron", {
+  chromosome_seqs <- Biostrings::DNAStringSet(c(chr1 = strrep("A", 20)))
+  plus <- GenomicRanges::GRangesList(GenomicRanges::GRanges("chr1:2-4:+"))
+  result <- write_codons(chromosome_seqs, plus, "ATG")
+  expect_equal(as.character(Biostrings::subseq(result[["chr1"]], 2, 4)), "ATG")
+  # Minus strand: the codon reads from right to left on the complement.
+  minus <- GenomicRanges::GRangesList(GenomicRanges::GRanges("chr1:2-4:-"))
+  result <- write_codons(chromosome_seqs, minus, "ATG")
+  expect_equal(as.character(Biostrings::subseq(result[["chr1"]], 2, 4)), "CAT")
+  # A codon split by an intron: 1 nt in the first exon, 2 in the second.
+  split_plus <- GenomicRanges::GRangesList(
+    GenomicRanges::GRanges(c("chr1:5-5:+", "chr1:10-11:+")))
+  result <- as.character(write_codons(chromosome_seqs, split_plus, "TGA")[["chr1"]])
+  expect_equal(substring(result, c(5, 10, 11), c(5, 10, 11)), c("T", "G", "A"))
+  # The same on the minus strand: transcript order runs from right to left.
+  split_minus <- GenomicRanges::GRangesList(
+    GenomicRanges::GRanges(c("chr1:15-16:-", "chr1:8-8:-")))
+  result <- as.character(write_codons(chromosome_seqs, split_minus, "TGA")[["chr1"]])
+  # Transcript T G A -> genome complement A C T at 16, 15, 8.
+  expect_equal(substring(result, c(16, 15, 8), c(16, 15, 8)), c("A", "C", "T"))
 })
