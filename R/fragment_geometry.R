@@ -1071,7 +1071,9 @@ write_dropped_reads <- function(dropped, file_base) {
   data.table::fwrite(data.table::data.table(
     transcript_id = dropped$transcript_id,
     region = ifelse(grepl(":", group, fixed = TRUE), sub(":.*", "", group), NA_character_),
-    reads = dropped$reads
+    reads = dropped$reads,
+    reason = ifelse(group == "uorf:no_uorf", "no uORF in the genome",
+                    "no position with reads and room for a whole fragment")
   ), path, sep = "\t")
   path
 }

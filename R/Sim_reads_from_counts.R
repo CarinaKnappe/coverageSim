@@ -97,7 +97,11 @@
 #'  Tables returned by \code{load_seq_bias(bias = "all")} must be subset first.
 #' @param uorf_prop_within_gene = "uniform". How should counts for uORF be
 #' distributed. Alternatives: 'length' (length biased), or user specified
-#' list of numeric values for all ORFs.
+#' list of numeric values for all ORFs. A gene can have uORF reads in the count
+#' table but no uORF in the genome (e.g. its leader was too short to hold one); those
+#' reads are left out, reported in a message and listed in
+#' `<sample>_dropped_reads.tsv` with region "uorf" and reason "no uORF in the
+#' genome".
 #' @param validate logical, TRUE, check that experiment was correctly made.
 #' Set to false if you know it won't and you will fix it later. This happens
 #' if you want to put a new sample with different parameters,
@@ -120,7 +124,8 @@
 #' go to the other positions of the same region of the same transcript, and if
 #' no position of that region with reads has room, they are left out. Reads left out are
 #' reported in a message and in `<sample>_dropped_reads.tsv` next to the
-#' library file. `"error"` stops at the first such position.
+#' library file, with reason "no position with reads and room for a whole
+#' fragment". `"error"` stops at the first such position.
 #' End-bias sources may also be `"user"` or `"learned"` with a table of
 #' `kmer`, `weight`, and optionally `fragment_length`; use
 #' \code{make_synthetic_end_bias()} to create a simple explicit profile.
@@ -312,6 +317,9 @@ simNGScoverage <- function(simGenome,
     keep <- txNames(uorf_ranges) %in% transcripts
     uorf_ranges <- uorf_ranges[keep]
     if (uorf_prop_mode == "numeric") uorf_prop_within_gene <- uorf_prop_within_gene[keep]
+    # None of the requested genes has a uORF: their uORF reads are left out
+    # and reported per sample, so there is nothing to tile.
+    if (!length(uorf_ranges)) regionsToSample <- setdiff(regionsToSample, "uorf")
   }
   if ("cds" %in% regionsToSample) {
     if (any((widthPerGroup(cds_ranges, FALSE) %% 3) != 0)) {
@@ -352,12 +360,27 @@ simNGScoverage <- function(simGenome,
                                         dmn_family, dmn_gdm_scale, dmn_zero_inflation,
                                         debug_coverage, env = run_env,
                                         defer_counts = defer_counts)
+    # uORF reads of genes that got no uORF in step 1 have nowhere to go.
+    no_uorf <- uorf_reads_without_uorf(count_table[, s], uorf_ranges)
+    if (nrow(no_uorf)) {
+      message("-- ", assay_column, ": ", sum(no_uorf$reads), " uORF reads left out ",
+              "for ", nrow(no_uorf), " transcript(s) without a uORF in the genome; ",
+              "see ", assay_column, "_dropped_reads.tsv")
+    }
     # Distributing reads only moves them between positions, so the total must
-    # match exactly. A difference here means a real defect, not rounding.
+    # match exactly, apart from the uORF reads left out above. A difference
+    # here means a real defect, not rounding.
     expected_counts <- data.table::data.table(
       seqnames = assay_by_chromosome$seqnamesPer,
       expected = assay_by_chromosome[, assay_column, with = FALSE][[1]]
     )
+    if (nrow(no_uorf)) {
+      left_out <- data.table::data.table(
+        seqnames = seqnamesPerGroup(cds_ranges, keep.names = FALSE)[no_uorf$row],
+        reads = no_uorf$reads
+      )[, .(reads = sum(reads)), by = seqnames]
+      expected_counts[left_out, expected := expected - i.reads, on = "seqnames"]
+    }
     actual_counts <- dt_final[, .(actual = sum(score)), by = "seqnames"]
     count_check <- merge(expected_counts, actual_counts, by = "seqnames", all = TRUE)
     count_check[is.na(count_check)] <- 0
@@ -385,6 +408,8 @@ simNGScoverage <- function(simGenome,
       }
       stopifnot(isTRUE(all.equal(sum(fragment_table$score) + sum(dropped$reads),
                                  sum(dt_final$score))))
+      dropped <- data.table::rbindlist(list(
+        no_uorf[, .(sampling_group, transcript_id, reads)], dropped), use.names = TRUE)
       gr_final <- simulated_rpf_alignments(
         fragment_table,
         seqinfo = fill_missing_seqlengths(GenomeInfoDb::seqinfo(mrna_ranges),
@@ -399,9 +424,10 @@ simNGScoverage <- function(simGenome,
                                               simGenome["genome"])
     format <- resolve_export_format(libFormats, libtypes[s])
     file_base <- file.path(out_dir, assay_column)
+    if (!simulated_rpf) dropped <- no_uorf[, .(sampling_group, transcript_id, reads)]
+    write_dropped_reads(dropped, file_base)
     if (simulated_rpf) {
       write_fragment_ground_truth(fragment_table, file_base, ground_truth)
-      write_dropped_reads(dropped, file_base)
     } else if (!identical(ground_truth, FALSE) && !is.null(ground_truth)) {
       warning("Ground truth is currently written only for simulated RPF libraries")
     }
@@ -472,6 +498,8 @@ nt_coverage_all_regions <- function(count_table_regions, libClass,
   data.table::rbindlist(lapply(regionsToSample, function(region) {
     assay <- assay(count_table_regions, region)
     region_counts <- as.vector(assay)
+    # Without any uORF, all uORF reads were left out (uorf_reads_without_uorf()).
+    if (region == "uorf" && !length(uorf_ranges)) return(NULL)
     if (sum(region_counts) > 0) {
       lengths <- get(paste0("lengths_", region), envir = env)
       libtype <- as.character(count_table_regions$libtype)
@@ -630,4 +658,21 @@ draw_site_probabilities <- function(weights, dirichlet = FALSE,
     }
   }
   weights / sum(weights)
+}
+
+# uORF reads of one sample for genes that have no uORF in the genome: step 3
+# does not know the genome, so it can give uORF reads to a gene whose leader
+# had no room for a uORF in step 1. `row` is the gene's row in the count table.
+uorf_reads_without_uorf <- function(count_table_sample, uorf_ranges) {
+  empty <- data.table::data.table(sampling_group = character(0),
+                                  transcript_id = character(0),
+                                  reads = numeric(0), row = integer(0))
+  if (!"uorf" %in% assayNames(count_table_sample)) return(empty)
+  counts <- as.vector(assay(count_table_sample, "uorf"))
+  ids <- rownames(count_table_sample)
+  with_uorf <- if (is.null(uorf_ranges)) character(0) else txNames(uorf_ranges)
+  missing <- which(counts > 0 & !ids %in% with_uorf)
+  if (!length(missing)) return(empty)
+  data.table::data.table(sampling_group = "uorf:no_uorf", transcript_id = ids[missing],
+                         reads = counts[missing], row = missing)
 }

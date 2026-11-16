@@ -149,7 +149,11 @@ a data.table with correctly named columns:
 
 \item{uorf_prop_within_gene}{= "uniform". How should counts for uORF be
 distributed. Alternatives: 'length' (length biased), or user specified
-list of numeric values for all ORFs.}
+list of numeric values for all ORFs. A gene can have uORF reads in the count
+table but no uORF in the genome (e.g. its leader was too short to hold one); those
+reads are left out, reported in a message and listed in
+`<sample>_dropped_reads.tsv` with region "uorf" and reason "no uORF in the
+genome".}
 
 \item{validate}{logical, TRUE, check that experiment was correctly made.
 Set to false if you know it won't and you will fix it later. This happens
@@ -175,7 +179,8 @@ footprints the distribution allows) gets no reads: they
 go to the other positions of the same region of the same transcript, and if
 no position of that region with reads has room, they are left out. Reads left out are
 reported in a message and in `<sample>_dropped_reads.tsv` next to the
-library file. `"error"` stops at the first such position.
+library file, with reason "no position with reads and room for a whole
+fragment". `"error"` stops at the first such position.
 End-bias sources may also be `"user"` or `"learned"` with a table of
 `kmer`, `weight`, and optionally `fragment_length`; use
 \code{make_synthetic_end_bias()} to create a simple explicit profile.

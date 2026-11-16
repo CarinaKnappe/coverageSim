@@ -576,3 +576,47 @@ test_that("shuffled input counts remain attached to their transcript identifiers
     expect_equal(actual$reads[match(rownames(table), actual$transcript_id)], values)
   }
 })
+
+test_that("uORF reads of a gene without a uORF are left out and reported", {
+  set.seed(1)
+  genome_dir <- tempfile("genome-"); dir.create(genome_dir)
+  # The first two leaders are too short for a uORF.
+  genome <- suppressWarnings(suppressMessages(simGenome(
+    n = 6, out_dir = genome_dir, genome_name = "g", max_uorfs = 1,
+    leader_length = c(3, 3, 140, 140, 140, 140), debug_on = FALSE
+  )))
+  with_uorf <- unique(ORFik::txNames(readRDS(genome["uorfs"])))
+  counts <- suppressMessages(simCountTables(
+    ORFik::loadRegion(genome["txdb"], "cds"), libtypes = "RFP",
+    print_statistics = FALSE
+  ))
+  regions <- suppressMessages(simCountTablesRegions(
+    counts, regionsToSample = c("leader", "cds", "trailer", "uorf")
+  ))
+  uorf_counts <- SummarizedExperiment::assay(regions, "uorf")[, 1]
+  no_room <- setdiff(names(uorf_counts)[uorf_counts > 0], with_uorf)
+  expect_gt(length(no_room), 0L)
+  run <- function(regions, mode) {
+    out_dir <- tempfile("coverage-"); dir.create(out_dir)
+    expect_message(
+      suppressWarnings(simNGScoverage(genome, regions, out_dir = out_dir,
+                                      fragment_mode = mode,
+                                      exp_name = basename(out_dir),
+                                      exp_save_dir = out_dir)),
+      "uORF reads left out for"
+    )
+    data.table::fread(file.path(out_dir, paste0(colnames(regions)[1],
+                                                "_dropped_reads.tsv")))
+  }
+  for (mode in c("legacy_point", "simulated_rpf")) {
+    left_out <- run(regions, mode)[reason == "no uORF in the genome"]
+    expect_setequal(left_out$transcript_id, no_room)
+    expect_equal(sum(left_out$reads), sum(uorf_counts[no_room]))
+    expect_true(all(left_out$region == "uorf"))
+  }
+  # Only genes without a uORF: every uORF read is left out.
+  only_no_room <- regions[no_room, ]
+  left_out <- run(only_no_room, "simulated_rpf")[reason == "no uORF in the genome"]
+  expect_equal(sum(left_out$reads), sum(uorf_counts[no_room]))
+})
+
